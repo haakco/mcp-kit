@@ -14,11 +14,12 @@ import (
 
 // Provider owns OAuth provider state and HTTP handlers.
 type Provider struct {
-	oauth        fosite.OAuth2Provider
-	store        storage.Store
-	issuer       string
-	audience     string
-	allowedScope map[string]struct{}
+	oauth         fosite.OAuth2Provider
+	store         storage.Store
+	issuer        string
+	audience      string
+	allowedScopes []string
+	allowedScope  map[string]struct{}
 }
 
 // New constructs an OAuth provider backed by Fosite.
@@ -65,11 +66,12 @@ func New(cfg Config) (*Provider, error) {
 	)
 
 	return &Provider{
-		oauth:        fositeProvider,
-		store:        cfg.Store,
-		issuer:       cfg.Issuer,
-		audience:     cfg.Audience,
-		allowedScope: scopeSet(cfg.AllowedScopes),
+		oauth:         fositeProvider,
+		store:         cfg.Store,
+		issuer:        cfg.Issuer,
+		audience:      cfg.Audience,
+		allowedScopes: append([]string{}, cfg.AllowedScopes...),
+		allowedScope:  scopeSet(cfg.AllowedScopes),
 	}, nil
 }
 
@@ -80,7 +82,12 @@ func (p *Provider) OAuth2Provider() fosite.OAuth2Provider {
 
 // RegisterHandler returns the dynamic client registration handler.
 func (p *Provider) RegisterHandler() http.Handler {
-	return &RegistrationHandler{store: p.store, allowedScope: p.allowedScope, audience: p.audience}
+	return &RegistrationHandler{
+		store:         p.store,
+		allowedScopes: p.allowedScopes,
+		allowedScope:  p.allowedScope,
+		audience:      p.audience,
+	}
 }
 
 func scopeSet(scopes []string) map[string]struct{} {

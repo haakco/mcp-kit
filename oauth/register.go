@@ -41,9 +41,10 @@ var (
 
 // RegistrationHandler implements RFC 7591 dynamic client registration.
 type RegistrationHandler struct {
-	store        storage.Store
-	allowedScope map[string]struct{}
-	audience     string
+	store         storage.Store
+	allowedScopes []string
+	allowedScope  map[string]struct{}
+	audience      string
 }
 
 func (h *RegistrationHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -100,7 +101,7 @@ func (h *RegistrationHandler) process(r *http.Request, req registrationRequest) 
 	if code != "" {
 		return nil, status, code, description
 	}
-	scopes, scopeString, err := normalizeScopes(req.Scope, h.allowedScope)
+	scopes, scopeString, err := normalizeScopesWithDefault(req.Scope, h.allowedScopes, h.allowedScope)
 	if err != nil {
 		return nil, http.StatusBadRequest, "invalid_client_metadata", err.Error()
 	}
@@ -222,6 +223,26 @@ func normalizeScopes(scope string, allowed map[string]struct{}) ([]string, strin
 		if _, ok := allowed[requested]; !ok {
 			return nil, "", fmt.Errorf("scope %q is not allowed", requested)
 		}
+	}
+	return scopes, strings.Join(scopes, " "), nil
+}
+
+func normalizeScopesWithDefault(scope string, allowedScopes []string, allowed map[string]struct{}) ([]string, string, error) {
+	if strings.TrimSpace(scope) != "" {
+		return normalizeScopes(scope, allowed)
+	}
+	scopes := make([]string, 0, len(allowedScopes))
+	seen := make(map[string]struct{}, len(allowedScopes))
+	for _, allowedScope := range allowedScopes {
+		allowedScope = strings.TrimSpace(allowedScope)
+		if allowedScope == "" {
+			continue
+		}
+		if _, duplicate := seen[allowedScope]; duplicate {
+			continue
+		}
+		seen[allowedScope] = struct{}{}
+		scopes = append(scopes, allowedScope)
 	}
 	return scopes, strings.Join(scopes, " "), nil
 }

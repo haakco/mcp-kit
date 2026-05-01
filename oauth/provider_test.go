@@ -162,6 +162,43 @@ func TestRegisterPublicClient(t *testing.T) {
 	}
 }
 
+func TestRegisterDefaultsOmittedScopeToAllowedScopes(t *testing.T) {
+	store := storage.NewMemoryStore()
+	provider := newTestProvider(t, store)
+
+	request := httptest.NewRequest(http.MethodPost, "/oauth/register", strings.NewReader(`{
+		"client_name":"Codex",
+		"redirect_uris":["http://127.0.0.1:59771/callback"],
+		"grant_types":["authorization_code","refresh_token"],
+		"response_types":["code"],
+		"token_endpoint_auth_method":"none"
+	}`))
+	request.Header.Set("Content-Type", "application/json")
+	response := httptest.NewRecorder()
+
+	provider.RegisterHandler().ServeHTTP(response, request)
+
+	if response.Code != http.StatusCreated {
+		t.Fatalf("status = %d, want 201; body=%s", response.Code, response.Body.String())
+	}
+	var payload map[string]any
+	if err := json.NewDecoder(response.Body).Decode(&payload); err != nil {
+		t.Fatalf("decode registration response: %v", err)
+	}
+	if got := payload["scope"]; got != "openid mcp.read mcp.write offline_access" {
+		t.Fatalf("scope = %#v, want provider allowed scopes", got)
+	}
+
+	clientID, _ := payload["client_id"].(string)
+	client, err := store.GetClient(t.Context(), clientID)
+	if err != nil {
+		t.Fatalf("GetClient() error = %v", err)
+	}
+	if got := strings.Join(client.Scopes, " "); got != "openid mcp.read mcp.write offline_access" {
+		t.Fatalf("stored scopes = %q, want provider allowed scopes", got)
+	}
+}
+
 func TestRegisterRejectsUnsafeRedirectSchemes(t *testing.T) {
 	store := storage.NewMemoryStore()
 	provider := newTestProvider(t, store)
