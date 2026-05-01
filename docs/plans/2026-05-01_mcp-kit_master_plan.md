@@ -20,6 +20,65 @@
 
 ---
 
+## How to use this plan
+
+1. **Read once cover-to-cover** to understand the kit's scope and the consumer migration order.
+2. **Pick the next unstarted phase** from the Phase Map below.
+3. **Open that phase's section** for files, source paths, sub-steps, and verify commands.
+4. **Execute the steps verbatim** — verify commands are copy-paste ready.
+5. **Tick the phase's verify checklist** before tagging the phase done.
+6. **Update this plan** with the actual completion date and link the commit SHA in the phase's "Status" line.
+7. **Move to the next phase** only after all verify items pass.
+
+If a phase fails verification, do NOT advance. Stop, fix the underlying issue (which may be in the kit or in the consumer), and re-run verification.
+
+---
+
+## Phase Map (dependency graph)
+
+```
+Phase 1 (Skeleton) ✅ DONE
+   │
+   ▼
+Phase 2 (v0.1.0 release + cycle docs port)
+   │
+   ▼
+Phase 3 (OAuth core extraction)  ◄─── largest phase (6d)
+   │
+   ▼
+Phase 4 (CLI auth helper)
+   │
+   ▼
+Phase 5 (Test kit)  ◄─── tags v0.2.1; gate before consumer migrations
+   │
+   ▼
+Phase 6 (skills-mcp migration)  ◄─── largest migration (7d, donates OAuth)
+   │
+   ▼
+Phase 7 (vorrent migration)
+   │
+   ▼
+Phase 8 (meridian plan rewrite — docs only)
+   │
+   ▼
+Phase 9 (meridian implementation)  ◄─── tags v1.0.0
+   │
+   ├──► Phase 10 (Skills update — independent, can run in parallel with Phase 9)
+   │
+   ▼
+Phase 11 (Migration docs)
+   │
+   ▼
+Phase 12 (Public release + CI)  ◄─── final
+```
+
+**Critical-path phases** (block everything downstream): 1, 2, 3, 4, 5, 6, 7, 9, 12.
+**Non-blocking phases** (can land anytime after their input): 8 (anytime after 7), 10 (anytime after 1), 11 (anytime after 9).
+
+Phase 6 is the gate that proves the kit's API survives a real consumer. If Phase 6 surfaces breaking changes, those must land in the kit before Phase 7 starts.
+
+---
+
 ## Reference Directories
 
 This plan references concrete code in five locations. All paths are absolute on the local workstation.
@@ -218,28 +277,298 @@ Twelve phases. v0.1.0 (skeleton) is complete. Remaining phases ship as v0.2.0 �
 - `/Users/timhaak/Dev/HaakCo/AiProjects/skills/apps/skills-mcp/ent/schema/oauthclient.go` (informs `entschema/oauth_client.go`)
 - `/Users/timhaak/Dev/HaakCo/AiProjects/skills/apps/skills-mcp/ent/schema/oauthsigningkey.go`
 
-**Steps:**
-1. **Sub-step 3.1: OAuth keys** — port `keys.go` + `rotator.go`. Tests must include rotation, grace window, retired-key cleanup, audit emit. Use the kit's `audit.Emitter` interface (not skills-mcp's concrete `service.AuditService`).
-2. **Sub-step 3.2: Storage** — port `storage.go`. Extract Fosite storage interface; provide Ent-backed impl behind it. Tests roundtrip auth-code → access-token → refresh-token.
-3. **Sub-step 3.3: Provider + handlers** — port `provider.go`, `handlers.go`, `register.go`. Use kit's `userstore.Store` interface for user lookup (not skills-mcp's concrete `service.UserService`).
-4. **Sub-step 3.4: Bearer + PAT middleware** — port `middleware.go`, `pat_validator.go`, `verify.go`, `password.go`. Use kit's interfaces.
-5. **Sub-step 3.5: Login classifier** — port `log_classify.go` verbatim (no consumer-specific dependencies).
-6. **Sub-step 3.6: Discovery** — port `discovery.go` to `mcp-kit/oidc/discovery.go` + `openid.go`. **CRITICAL:** `authorization_servers` field MUST be the issuer URL (lesson from Vorrent ISSUE-002).
-7. **Sub-step 3.7: Ent mixins** — convert each schema in `apps/skills-mcp/ent/schema/oauth*.go` to a mixin under `entschema/`. Tests via a fixture project that composes the mixin.
-8. **Sub-step 3.8: PKCE helpers** — port `apps/skills-mcp/internal/cliauth/pkce.go` to `oauth/pkce.go`. Substitution-correct (`base64.RawURLEncoding`, lesson OG-04).
-9. **Sub-step 3.9: Bind kit-level `mcpkit.New()` to the OAuth core.** Replace `ErrNotImplemented` with real composition: Origin → Bearer → Envelope → SDK handler.
-10. **Sub-step 3.10: Reference example** — create `mcp-kit/_examples/minimal-server/` that boots kit + a single in-memory user + Discard audit + `mcp.read` scope tool, exposes `/mcp` + `/mcp-oauth/*` + `/.well-known/*`. Smoke-tests via shell script.
+**Detailed sub-steps:**
+
+#### Sub-step 3.1: OAuth signing keys (1 day)
+
+**Files (kit, create):**
+- `mcp-kit/oauth/keys/manager.go` — RSA key gen, JWKS encoding, persistence
+- `mcp-kit/oauth/keys/rotator.go` — background rotator goroutine
+- `mcp-kit/oauth/keys/manager_test.go`, `rotator_test.go`
+
+**Direct ports from:**
+- `/Users/timhaak/Dev/HaakCo/AiProjects/skills/apps/skills-mcp/internal/oidc/keys.go` → `manager.go`
+- `/Users/timhaak/Dev/HaakCo/AiProjects/skills/apps/skills-mcp/internal/oidc/rotator.go` → `rotator.go`
+
+**Substitutions during port:**
+- `service.AuditService` → `audit.Emitter` (kit interface)
+- `auditpayload.KeyRotated{NewKID: ...}` → `audit.Event{EntityType: "oauth_key", Action: "rotated", EntityID: kid}`
+- Imports: `github.com/haakco/skills-mcp/...` → `github.com/haakco/mcp-kit/...`
+
+**Tests required (4 minimum, copied from skills-mcp's `rotator_test.go`):**
+- `TestEnsureSigningKey_creates_when_absent`
+- `TestRotateSigningKey_marks_prior_retired`
+- `TestActiveJWKSet_includes_retired_within_grace`
+- `TestRetireExpiredKeys_deletes_past_grace`
 
 **Verify:**
-- `cd mcp-kit && go test ./... -count=1` — all packages green.
-- `cd mcp-kit/_examples/minimal-server && go run .` boots, `/healthz` 200.
-- Run cycle 1 dispatch runbook P0–P3 against the example server. Token mints; `tools/list` returns the example tool.
+```bash
+cd /Users/timhaak/Dev/HaakCo/AiProjects/sharedLib/golang/mcp-kit
+go test ./oauth/keys/... -count=1 -race
+```
+Expected: PASS, all 4+ tests green.
 
-**Commit:** `feat(oauth): extract OAuth core from skills-mcp`
+**Commit:** `feat(oauth/keys): RSA key manager + 90d/48h grace rotator`
 
-**Tag:** `v0.2.0-rc.1` after example server passes the runbook.
+#### Sub-step 3.2: Fosite storage (1 day)
 
-**Effort:** 6 days.
+**Files (kit, create):**
+- `mcp-kit/oauth/storage/storage.go` — Fosite storage interface composition
+- `mcp-kit/oauth/storage/ent.go` — Ent-backed implementation (default)
+- `mcp-kit/oauth/storage/storage_test.go` — interface compliance tests
+- `mcp-kit/oauth/storage/ent_test.go` — roundtrip tests
+
+**Direct port from:**
+- `/Users/timhaak/Dev/HaakCo/AiProjects/skills/apps/skills-mcp/internal/oidc/storage.go` → `ent.go`
+
+**Substitutions:**
+- All `*ent.Client` references stay (kit defaults to Ent)
+- Schema-specific entity types (`ent.OauthClient` etc.) → consumer's Ent client; kit's `entschema/` mixins guarantee field shape
+- Tests use in-memory SQLite Ent client
+
+**Tests required (3 minimum):**
+- `TestStorage_AuthCodeRoundtrip` — store → retrieve → invalidate
+- `TestStorage_AccessTokenRoundtrip`
+- `TestStorage_RefreshTokenRotation` — store → revoke → replacement issued
+
+**Verify:**
+```bash
+cd /Users/timhaak/Dev/HaakCo/AiProjects/sharedLib/golang/mcp-kit
+go test ./oauth/storage/... -count=1
+```
+
+**Commit:** `feat(oauth/storage): Fosite storage interface + Ent adapter`
+
+#### Sub-step 3.3: OAuth provider + handlers (1.5 days)
+
+**Files (kit, create):**
+- `mcp-kit/oauth/config.go` — `Config` struct + `applyDefaults()`
+- `mcp-kit/oauth/provider.go` — `New()`, Fosite compose
+- `mcp-kit/oauth/handlers.go` — `/authorize`, `/token`, `/register`, `/revoke`
+- `mcp-kit/oauth/handlers_test.go` — full OAuth flow integration
+
+**Direct ports from:**
+- `/Users/timhaak/Dev/HaakCo/AiProjects/skills/apps/skills-mcp/internal/oidc/provider.go` → `provider.go`
+- `/Users/timhaak/Dev/HaakCo/AiProjects/skills/apps/skills-mcp/internal/oidc/handlers.go` → `handlers.go`
+- `/Users/timhaak/Dev/HaakCo/AiProjects/skills/apps/skills-mcp/internal/oidc/register.go` → folded into `handlers.go`
+
+**Substitutions:**
+- `service.UserService.FindByEmail(...)` → `userstore.Store.FindByEmail(...)`
+- `service.UserService.VerifyPassword(...)` → `userstore.VerifyPassword(...)` helper
+- HTML login template stays in skills-mcp; kit's `/authorize` returns JSON-only (per Open Question 2 in DESIGN.md)
+- Audience defaults to canonical `<issuer>/mcp` (lesson from Vorrent ISSUE-002)
+
+**Tests required (8 minimum, mirror skills-mcp's `oauth_flow_test.go`):**
+- `TestRegister_PublicClient` — POST `/register`, expect 201 + client_id
+- `TestAuthorize_HappyPath` — full code flow with PKCE
+- `TestAuthorize_RejectsBadState` — state < 8 chars (lesson OG-05)
+- `TestAuthorize_RejectsBadPKCE` — invalid code_challenge
+- `TestToken_ExchangesCode`
+- `TestToken_RefreshRotation` — old refresh revoked after use
+- `TestRevoke_IdempotentSuccess`
+- `TestEnvelope_InvalidGrantOnPKCEFailure` — error envelope shape
+
+**Verify:**
+```bash
+cd /Users/timhaak/Dev/HaakCo/AiProjects/sharedLib/golang/mcp-kit
+go test ./oauth/ -count=1
+```
+
+**Commit:** `feat(oauth): provider + handlers extracted from skills-mcp`
+
+#### Sub-step 3.4: Bearer + PAT middleware (1 day)
+
+**Files (kit, create):**
+- `mcp-kit/oauth/middleware.go` — `Bearer()` middleware
+- `mcp-kit/oauth/token_validator.go` — `TokenValidator` interface + impl
+- `mcp-kit/oauth/pat.go` — PAT validator
+- `mcp-kit/oauth/verify.go` — bcrypt password verify helper
+- All `*_test.go`
+
+**Direct ports from:**
+- `/Users/timhaak/Dev/HaakCo/AiProjects/skills/apps/skills-mcp/internal/auth/middleware.go` → `middleware.go`
+- `/Users/timhaak/Dev/HaakCo/AiProjects/skills/apps/skills-mcp/internal/auth/pat_validator.go` → `pat.go`
+- `/Users/timhaak/Dev/HaakCo/AiProjects/skills/apps/skills-mcp/internal/auth/verify.go` → `verify.go`
+- `/Users/timhaak/Dev/HaakCo/AiProjects/skills/apps/skills-mcp/internal/auth/password.go` → folded into `verify.go`
+
+**Substitutions:**
+- `service.TokenService` → `pat.Validator` interface (kit-defined)
+- `auth.PATServicer` → already an interface; rename to `pat.Servicer`
+- Error responses use kit's canonical envelope helper
+
+**Tests required (5 minimum):**
+- `TestBearer_AcceptsValidJWT`
+- `TestBearer_AcceptsValidPAT`
+- `TestBearer_Rejects401WithWWWAuthenticate` — header set on 401
+- `TestBearer_RejectsInsufficientScope`
+- `TestPAT_AsyncLastUsedUpdate`
+
+**Verify:**
+```bash
+go test ./oauth/ -run TestBearer -count=1
+go test ./oauth/ -run TestPAT -count=1
+```
+
+**Commit:** `feat(oauth): bearer + PAT middleware`
+
+#### Sub-step 3.5: Login classifier (2 hours)
+
+**Files (kit, create):**
+- `mcp-kit/oauth/login_classify.go` — fixed-vocabulary classifier
+- `mcp-kit/oauth/login_classify_test.go`
+
+**Direct port from:**
+- `/Users/timhaak/Dev/HaakCo/AiProjects/skills/apps/skills-mcp/internal/auth/log_classify.go`
+
+**Substitution:** `ent.IsNotFound(err)` → `errors.Is(err, userstore.ErrNotFound)`.
+
+**Verify:**
+```bash
+go test ./oauth/ -run TestClassify -count=1
+```
+
+**Commit:** `feat(oauth): fixed-vocabulary login error classifier`
+
+#### Sub-step 3.6: Discovery + JWKS (0.5 day)
+
+**Files (kit, create):**
+- `mcp-kit/oidc/discovery.go` — `/.well-known/oauth-authorization-server`
+- `mcp-kit/oidc/openid.go` — `/.well-known/openid-configuration`
+- `mcp-kit/oidc/protected_resource.go` — `/.well-known/oauth-protected-resource`
+- `mcp-kit/oidc/jwks.go` — `/.well-known/jwks.json`
+- `mcp-kit/oidc/discovery_test.go`
+
+**Direct port from:**
+- `/Users/timhaak/Dev/HaakCo/AiProjects/skills/apps/skills-mcp/internal/oidc/discovery.go`
+
+**CRITICAL** (lesson from Vorrent ISSUE-002):
+The `authorization_servers` field in `/.well-known/oauth-protected-resource` MUST be the issuer URL, NOT the metadata URL. Test asserts this exactly.
+
+**Tests required:**
+- `TestDiscovery_AuthorizationServersIsIssuerURL` — regression for ISSUE-002
+- `TestDiscovery_AllAdvertisedScopesPresent`
+- `TestJWKS_IncludesActiveAndRetiredKeys` — within grace window
+
+**Verify:**
+```bash
+go test ./oidc/ -count=1
+```
+
+**Commit:** `feat(oidc): discovery + JWKS endpoints`
+
+#### Sub-step 3.7: Ent schema mixins (0.5 day)
+
+**Files (kit, create):**
+- `mcp-kit/entschema/oauth_client.go`
+- `mcp-kit/entschema/oauth_signing_key.go`
+- `mcp-kit/entschema/oauth_authorization_code.go`
+- `mcp-kit/entschema/oauth_access_token.go`
+- `mcp-kit/entschema/oauth_refresh_token.go`
+- `mcp-kit/entschema/personal_access_token.go`
+- `mcp-kit/entschema/README.md` — composition guide for consumers
+- `mcp-kit/entschema/_test/` — fixture Ent schema that composes mixins; `go generate` produces a runnable client; tests assert field shape
+
+**Source schemas:**
+- `/Users/timhaak/Dev/HaakCo/AiProjects/skills/apps/skills-mcp/ent/schema/oauthclient.go`
+- `/Users/timhaak/Dev/HaakCo/AiProjects/skills/apps/skills-mcp/ent/schema/oauthsigningkey.go`
+- `/Users/timhaak/Dev/HaakCo/AiProjects/skills/apps/skills-mcp/ent/schema/oauthsession.go` (split into auth_code + access_token + refresh_token)
+- `/Users/timhaak/Dev/HaakCo/AiProjects/skills/apps/skills-mcp/ent/schema/personal_access_token.go`
+
+**Conversion pattern:**
+```go
+// Before (skills-mcp inline schema):
+type OAuthClient struct{ ent.Schema }
+func (OAuthClient) Fields() []ent.Field { return []ent.Field{...} }
+
+// After (kit mixin):
+package entschema
+type OAuthClient struct{ mixin.Schema }
+func (OAuthClient) Fields() []ent.Field { return []ent.Field{...} }
+
+// Consumer composes:
+package schema
+type OAuthClient struct{ ent.Schema }
+func (OAuthClient) Mixin() []ent.Mixin { return []ent.Mixin{kitschema.OAuthClient{}} }
+```
+
+**Verify:**
+```bash
+cd mcp-kit/entschema/_test
+go generate ./...
+go test ./...
+```
+
+**Commit:** `feat(entschema): Ent mixins for OAuth + PAT tables`
+
+#### Sub-step 3.8: PKCE helpers (2 hours)
+
+**Files (kit, create):**
+- `mcp-kit/oauth/pkce.go` — verifier/challenge generation
+- `mcp-kit/oauth/pkce_test.go`
+
+**Direct port from:**
+- `/Users/timhaak/Dev/HaakCo/AiProjects/skills/apps/skills-mcp/internal/cliauth/pkce.go`
+
+**CRITICAL** (lesson OG-04): Use `base64.RawURLEncoding` (substitution + no padding). Test asserts no `+`, `/`, or `=` characters in output.
+
+**Verify:**
+```bash
+go test ./oauth/ -run TestPKCE -count=1
+```
+
+**Commit:** `feat(oauth): PKCE helpers (substitution-correct base64url)`
+
+#### Sub-step 3.9: Bind kit `mcpkit.New()` (0.5 day)
+
+**Files (kit, modify):**
+- `mcp-kit/mcpkit/server.go` — replace `ErrNotImplemented` with real composition
+- `mcp-kit/mcpkit/server_test.go` — integration test of composed handler
+
+**Composition order (outer to inner):**
+1. `mcpmw.Origin` (already exists)
+2. `oauth.Bearer` (built in 3.4)
+3. `mcpmw.Envelope` (already exists)
+4. SDK MCP handler
+
+**Verify:**
+```bash
+cd mcp-kit
+go test ./mcpkit/ -count=1
+```
+
+**Commit:** `feat(mcpkit): compose middleware stack with OAuth + envelope + origin`
+
+#### Sub-step 3.10: Reference example (0.5 day)
+
+**Files (kit, create):**
+- `mcp-kit/_examples/minimal-server/main.go` — full boot in <200 lines
+- `mcp-kit/_examples/minimal-server/go.mod` (separate module to avoid forcing kit consumers to depend on example deps)
+- `mcp-kit/_examples/minimal-server/users.go` — in-memory `userstore.Store` with one user (admin@example.com / `admin`)
+- `mcp-kit/_examples/minimal-server/tools.go` — single `hello_world` tool
+- `mcp-kit/_examples/minimal-server/scripts/smoke.sh` — full P0–P3 dispatch runbook against this server
+
+**Verify:**
+```bash
+cd mcp-kit/_examples/minimal-server
+go run . &              # background
+sleep 2
+./scripts/smoke.sh      # mints token, runs handshake, calls tools/list
+kill %1
+```
+Expected: smoke.sh prints `PASS` for all phases.
+
+**Commit:** `feat(examples): minimal-server reference + smoke runbook`
+
+**Phase verify (all sub-steps):**
+- `cd mcp-kit && go test ./... -count=1 -race` — all green.
+- `cd mcp-kit/_examples/minimal-server && go run .` boots; `curl http://localhost:8080/.well-known/oauth-authorization-server` returns valid JSON; PKCE flow mints token; `tools/list` returns `[hello_world]`.
+- `golangci-lint run ./...` zero warnings.
+
+**Tag:** `v0.2.0-rc.1` after example server passes the runbook. Final `v0.2.0` after at least one external review of the API surface.
+
+**Phase commit:** `feat(oauth): extract OAuth core from skills-mcp` (squash of sub-steps 3.1–3.10).
+
+**Effort:** 6 days total across 10 sub-steps.
 
 ---
 
@@ -315,28 +644,288 @@ Twelve phases. v0.1.0 (skeleton) is complete. Remaining phases ship as v0.2.0 �
 - Modify: `apps/skills-mcp/ent/schema/oauthclient.go` etc — replace inline schema with kit mixin composition
 - Modify: `apps/skills-mcp/go.mod` — add `github.com/haakco/mcp-kit`, remove `github.com/mark3labs/mcp-go`
 
-**Steps:**
-1. **Sub-step 6.1: Add kit dependency.** `go get github.com/haakco/mcp-kit@v0.2.1`. Don't delete anything yet.
-2. **Sub-step 6.2: Build adapter layer.** `internal/kitwiring/{userstore,audit,authz}.go`. Three small adapters wrapping existing services. Tests prove the adapters satisfy the kit interfaces.
-3. **Sub-step 6.3: Schema mixin migration.** For each `oauth*` and `personal_access_token` schema, compose the kit mixin instead of redeclaring fields. Run `go generate ./ent/...`. Migration must be empty diff — same DDL.
-4. **Sub-step 6.4: Wire kit in main.** Construct `oauth.New()` → `mcpkit.New()` next to existing server bootstrap. Mount on a different path (`/mcp-v2`, `/mcp-oauth-v2`) for parallel testing.
-5. **Sub-step 6.5: Migrate tool registration.** For each `registry_*.go`, replace mark3labs `mcp.NewTool(name, opts...)` with the official SDK's tool registration. Tests must continue to pass.
-6. **Sub-step 6.6: Cut over.** Move `/mcp-v2` to `/mcp` and remove the legacy `/mcp` mount. Delete legacy OAuth code (the files listed above).
-7. **Sub-step 6.7: Run skills-mcp's verify-mcp-clients suite.** Must pass against the kit-backed binary.
-8. **Sub-step 6.8: Delete `internal/cliauth/`.** Replace `skills-mcp auth login` subcommand with a thin wrapper around `cliauth.Login()` from the kit.
+**Pre-flight checks:**
+
+Before starting Phase 6, confirm:
+- `mcp-kit` tagged `v0.2.1` and example server passing.
+- `_examples/minimal-server/scripts/smoke.sh` green.
+- skills-mcp's existing `verify-mcp-clients` test suite is green on `main` (baseline).
+- skills-mcp branch created: `git checkout -b refactor/adopt-mcp-kit`.
+
+**Detailed sub-steps:**
+
+#### Sub-step 6.1: Add kit dependency (2 hours)
+
+```bash
+cd /Users/timhaak/Dev/HaakCo/AiProjects/skills/apps/skills-mcp
+go get github.com/haakco/mcp-kit@v0.2.1
+go mod tidy
+```
 
 **Verify:**
-- `cd apps/skills-mcp && go test ./... -count=1` — green.
-- `just verify-mcp-clients http://127.0.0.1:8892` — green (with token if auth enabled).
-- Run cycle 1 dispatch runbook P0–P10 (adapted to skills-mcp's surface) against kit-backed binary.
-- Diff `go.mod`: `mark3labs/mcp-go` gone; `mcp-kit` present.
-- LOC delta: net deletion of ~3000 lines.
+```bash
+go build ./...                # compiles unchanged
+grep -n "mcp-kit" go.mod      # present
+```
 
-**Commit (in skills-mcp):** `refactor(mcp): adopt mcp-kit; remove vendored OAuth + middleware`
+**Commit:** `chore: add mcp-kit dependency`
 
-**Kit tag:** `v0.3.0` (after skills-mcp validation passes).
+#### Sub-step 6.2: Build adapter layer (1 day)
 
-**Effort:** 7 days.
+**Files (skills-mcp, create):**
+- `apps/skills-mcp/internal/kitwiring/userstore.go` — wraps `service.UserService` for `userstore.Store`
+- `apps/skills-mcp/internal/kitwiring/audit.go` — wraps `service.AuditService` for `audit.Emitter`
+- `apps/skills-mcp/internal/kitwiring/authz.go` — wraps `service.AuthzService` for `authz.Service`
+- All `*_test.go`
+
+**Adapter shape (illustrative):**
+```go
+package kitwiring
+
+type UserStore struct { svc *service.UserService }
+
+func (u *UserStore) FindByEmail(ctx context.Context, email string) (userstore.User, error) {
+    user, err := u.svc.FindByEmail(ctx, email)
+    if ent.IsNotFound(err) { return nil, userstore.ErrNotFound }
+    if err != nil { return nil, err }
+    return userAdapter{user}, nil
+}
+
+type userAdapter struct{ inner *ent.User }
+func (u userAdapter) ID() uuid.UUID         { return u.inner.UUID }
+func (u userAdapter) Email() string         { return u.inner.Email }
+func (u userAdapter) PasswordHash() []byte  { return u.inner.PasswordHash }
+func (u userAdapter) IsActive() bool        { return u.inner.IsActive }
+```
+
+**Tests required:**
+- `TestUserStore_FindByEmail_NotFoundMapsToErrNotFound`
+- `TestUserStore_FindByID_HappyPath`
+- `TestAudit_EmitForwardsToService`
+- `TestAuthz_CheckForwardsAndMapsForbidden`
+
+**Verify:**
+```bash
+go test ./internal/kitwiring/... -count=1
+```
+
+**Commit:** `feat(kitwiring): adapters for UserStore, AuditEmitter, AuthzService`
+
+#### Sub-step 6.3: Schema mixin migration (1 day)
+
+**Files (skills-mcp, modify):**
+- `apps/skills-mcp/ent/schema/oauthclient.go`
+- `apps/skills-mcp/ent/schema/oauthsigningkey.go`
+- `apps/skills-mcp/ent/schema/oauthsession.go` (or split into auth_code/access/refresh per kit's split)
+- `apps/skills-mcp/ent/schema/personal_access_token.go`
+
+**Pattern:**
+```go
+// Before:
+type OAuthClient struct{ ent.Schema }
+func (OAuthClient) Fields() []ent.Field { return []ent.Field{...} }
+func (OAuthClient) Edges() []ent.Edge   { return []ent.Edge{...} }
+
+// After:
+type OAuthClient struct{ ent.Schema }
+func (OAuthClient) Mixin() []ent.Mixin {
+    return []ent.Mixin{kitschema.OAuthClient{}}
+}
+func (OAuthClient) Edges() []ent.Edge { return []ent.Edge{...} }  // kept; mixin doesn't define edges
+```
+
+**CRITICAL:** Resulting Ent schema diff must be empty. Run:
+```bash
+cd apps/skills-mcp
+go generate ./ent/...
+git diff ent/migrate/migrations/*.sql
+```
+Expected: no SQL change. If non-empty, kit mixin is wrong; fix kit first.
+
+**Verify:**
+```bash
+go build ./...
+go test ./ent/... -count=1
+```
+
+**Commit:** `refactor(ent): compose kit mixins for OAuth + PAT schemas`
+
+#### Sub-step 6.4: Wire kit in main (parallel mount) (1 day)
+
+**Files (skills-mcp, modify):**
+- `apps/skills-mcp/cmd/skills-mcp/main.go` — add kit construction
+- `apps/skills-mcp/internal/server/server.go` — add `ServeKitHTTP()` method that mounts at `/mcp-v2`
+
+**Pattern:**
+```go
+// In main.go after existing server setup:
+oauthProv, _ := oauth.New(oauth.Config{
+    Issuer:       cfg.PublicURL,
+    EntClient:    entClient,
+    UserStore:    kitwiring.NewUserStore(userSvc),
+    AuditEmitter: kitwiring.NewAuditEmitter(auditSvc),
+})
+mcpKitServer, _ := mcpkit.New(mcpkit.Config{
+    Implementation: mcp.Implementation{Name: "skills-mcp", Version: cfg.Version},
+    Validator:      oauthProv.TokenValidator(),
+    AllowedOrigins: cfg.AllowedOrigins,
+    AllowLoopback:  cfg.IsDev,
+    AuditEmitter:   kitwiring.NewAuditEmitter(auditSvc),
+})
+
+mux.Handle("/mcp-v2", mcpKitServer.Handler())
+oauthProv.RegisterRoutes(mux, oauth.WithPathPrefix("/mcp-oauth-v2"))
+```
+
+**Both mounts active.** Legacy `/mcp` keeps mark3labs; new `/mcp-v2` runs kit.
+
+**Verify:**
+```bash
+./bin/skills-mcp serve
+curl http://localhost:8892/.well-known/oauth-authorization-server  # legacy
+curl http://localhost:8892/.well-known/oauth-authorization-server  # check kit's endpoints conflict-free; if so, kit endpoints under /v2 prefix
+curl http://localhost:8892/mcp-v2 -X POST ...                       # new mount responds
+```
+
+**Commit:** `feat(server): parallel mount kit-backed /mcp-v2 endpoint`
+
+#### Sub-step 6.5: Migrate tool registration (2 days)
+
+**Files (skills-mcp, modify):**
+- `apps/skills-mcp/internal/server/registry.go`
+- `apps/skills-mcp/internal/server/registry_skills_read.go`
+- `apps/skills-mcp/internal/server/registry_skills_write.go`
+- `apps/skills-mcp/internal/server/registry_clients.go`
+- `apps/skills-mcp/internal/server/registry_subscriptions.go`
+- `apps/skills-mcp/internal/server/registry_tree.go`
+
+**Pattern (mark3labs → official SDK):**
+```go
+// Before (mark3labs):
+import (
+    "github.com/mark3labs/mcp-go/mcp"
+    mcpserver "github.com/mark3labs/mcp-go/server"
+)
+mcpServer.AddTool(
+    mcp.NewTool("search_skills",
+        mcp.WithDescription("..."),
+        mcp.WithString("query", mcp.Required(), mcp.Description("..."))),
+    handlerFunc,
+)
+
+// After (official):
+import (
+    "github.com/modelcontextprotocol/go-sdk/mcp"
+)
+mcp.AddTool(sdkServer, &mcp.Tool{
+    Name:        "search_skills",
+    Description: "...",
+}, handlerFunc)  // typed handler signature
+```
+
+**Migrate one tool family per commit** (skills_read, skills_write, clients, subscriptions, tree). Tests must continue to pass after each.
+
+**Verify per family:**
+```bash
+go test ./internal/server/... -run TestRegistry -count=1
+```
+
+**Commit (per family):**
+- `refactor(mcp): migrate skills_read tools to official SDK`
+- `refactor(mcp): migrate skills_write tools to official SDK`
+- `refactor(mcp): migrate clients tools to official SDK`
+- `refactor(mcp): migrate subscriptions tools to official SDK`
+- `refactor(mcp): migrate tree tools to official SDK`
+
+#### Sub-step 6.6: Cut over (0.5 day)
+
+**Files (skills-mcp, modify):**
+- `apps/skills-mcp/cmd/skills-mcp/main.go`
+- `apps/skills-mcp/internal/server/server.go`
+
+**Steps:**
+1. Move `/mcp-v2` mount to `/mcp`.
+2. Move `/mcp-oauth-v2/*` mounts to `/mcp-oauth/*`.
+3. Delete legacy mark3labs construction code.
+
+**Verify:**
+```bash
+./bin/skills-mcp serve
+just verify-mcp-clients http://127.0.0.1:8892
+```
+Expected: full suite green against kit-backed binary.
+
+**Commit:** `refactor(server): cut over /mcp to kit; remove mark3labs mount`
+
+#### Sub-step 6.7: Delete legacy code (0.5 day)
+
+**Files (skills-mcp, delete):**
+- `apps/skills-mcp/internal/oidc/discovery.go`
+- `apps/skills-mcp/internal/oidc/handlers.go`
+- `apps/skills-mcp/internal/oidc/keys.go`
+- `apps/skills-mcp/internal/oidc/provider.go`
+- `apps/skills-mcp/internal/oidc/register.go`
+- `apps/skills-mcp/internal/oidc/rotator.go`
+- `apps/skills-mcp/internal/oidc/session_store.go`
+- `apps/skills-mcp/internal/oidc/storage.go`
+- `apps/skills-mcp/internal/oidc/form.go` (if unused after migration)
+- `apps/skills-mcp/internal/auth/middleware.go`
+- `apps/skills-mcp/internal/auth/pat_validator.go`
+- `apps/skills-mcp/internal/auth/log_classify.go`
+- `apps/skills-mcp/internal/auth/verify.go`
+- `apps/skills-mcp/internal/auth/password.go`
+- `apps/skills-mcp/internal/auth/scope_context.go` (if unused — verify no consumers in HTML handlers)
+- `apps/skills-mcp/internal/cliauth/` (entire package)
+- All corresponding `*_test.go`
+
+**Files (skills-mcp, modify):**
+- `apps/skills-mcp/cmd/skills-mcp/auth.go` — `auth login` subcommand becomes thin wrapper around `cliauth.Login()` from kit
+- `apps/skills-mcp/go.mod` — remove `github.com/mark3labs/mcp-go`
+
+**Verify:**
+```bash
+go mod tidy
+go build ./...
+go test ./... -count=1 -race
+just verify-mcp-clients http://127.0.0.1:8892
+```
+
+**Commit:** `chore: delete vendored OAuth + cliauth (now in mcp-kit)`
+
+#### Sub-step 6.8: Cycle methodology validation (1 day)
+
+Run the cycle dispatch runbook (template from kit's `docs/dispatch-runbook-template.md`) against skills-mcp's kit-backed binary.
+
+**Phases to execute:**
+- P0 Bootstrap — mint token via kit's OAuth flow
+- P1 Initialize handshake (TQ-02)
+- P2 OAuth deep coverage (refresh rotation, error envelopes)
+- P3 Auth + origin + scope
+- P4 Tool surface (skills/clients/subs/tree)
+- P5 PAT validation
+- P6 Discovery accuracy
+- P7 Envelope conformance + instructions accuracy
+
+**Real-client gates (mandatory before kit `v0.3.0` tag):**
+- MCP Inspector connects + lists tools
+- Claude Code connects + executes one tool
+
+**Verify:** All phases green. Captures saved under `apps/skills-mcp/docs/cycle-evidence/2026-MM-DD/`.
+
+**Commit:** `test(mcp): cycle dispatch validation against kit-backed binary`
+
+**Phase verify (all sub-steps):**
+- LOC delta: `git diff --stat main...refactor/adopt-mcp-kit` shows ~3000 net deleted lines.
+- `go.mod` diff: `mark3labs/mcp-go` removed; `mcp-kit` present.
+- `verify-mcp-clients` green.
+- Cycle methodology P0–P7 + real-client gates green.
+- All consumer-facing tool names + behaviors unchanged (no client breakage).
+
+**Phase commit:** `refactor(mcp): adopt mcp-kit; remove vendored OAuth + middleware`
+
+**Kit tag:** `v0.3.0` after sub-step 6.8 closes.
+
+**Effort:** 7 days total across 8 sub-steps.
 
 ---
 
@@ -661,3 +1250,118 @@ Per `~/.claude/CLAUDE.md` Completion Checklist + MCP-specific:
 - **Cross-pollination analysis:** `/Volumes/Dev/HaakCo/AiProjects/vorrent/docs/plans/mcp/cross_repo_recommendations.md`
 - **Meridian add_mcp.md (pre-rewrite):** `/Users/timhaak/Dev/mairin/meridian/docs/plans/add_mcp.md`
 - **Skills repo (canonical):** `/Users/timhaak/Dev/HaakCo/AiProjects/skills/skills/`
+
+---
+
+## Appendix A: Verify-commands cheatsheet
+
+Copy-paste recipes for the most common verification points. All run from the indicated working directory.
+
+### Kit build + test (any phase)
+
+```bash
+cd /Users/timhaak/Dev/HaakCo/AiProjects/sharedLib/golang/mcp-kit
+unset GOROOT  # mise/Go interaction guard
+go build ./...
+go test ./... -count=1 -race
+golangci-lint run ./...
+```
+
+### Smoke the example server (Phase 3 sub-step 3.10 onwards)
+
+```bash
+cd /Users/timhaak/Dev/HaakCo/AiProjects/sharedLib/golang/mcp-kit/_examples/minimal-server
+go run . &
+sleep 2
+./scripts/smoke.sh
+kill %1
+```
+
+### skills-mcp (Phase 6)
+
+```bash
+cd /Users/timhaak/Dev/HaakCo/AiProjects/skills/apps/skills-mcp
+unset GOROOT
+go build ./...
+go test ./... -count=1
+just verify-mcp-clients http://127.0.0.1:8892        # client contract
+git diff --stat main...HEAD                           # LOC delta check
+grep -c "mark3labs/mcp-go" go.mod || echo "removed"   # confirm SDK swap
+```
+
+### vorrent (Phase 7)
+
+```bash
+cd /Volumes/Dev/HaakCo/AiProjects/vorrent
+unset GOROOT
+go build ./...
+go test ./internal/mcpserver/... -count=1
+git diff --stat main...HEAD                            # LOC delta check
+```
+
+### meridian (Phase 9)
+
+```bash
+cd /Users/timhaak/Dev/mairin/meridian/backend
+task build
+task test
+task lint
+```
+
+### Cycle dispatch (any consumer)
+
+```bash
+# 1. Mint token (P0)
+TOKEN=$(./scripts/mcp-test-token.sh)
+
+# 2. Three-step handshake (P1)
+SESSION=$(curl -i -s -X POST $URL/mcp \
+  -H "Authorization: Bearer $TOKEN" \
+  -H 'Content-Type: application/json' \
+  -H 'Accept: application/json, text/event-stream' \
+  -d '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05","capabilities":{},"clientInfo":{"name":"test","version":"0"}}}' \
+  | grep -i '^Mcp-Session-Id' | awk '{print $2}' | tr -d '\r')
+
+curl -X POST $URL/mcp -H "Authorization: Bearer $TOKEN" -H "Mcp-Session-Id: $SESSION" \
+  -H 'Content-Type: application/json' -H 'Accept: application/json, text/event-stream' \
+  -d '{"jsonrpc":"2.0","method":"notifications/initialized"}'  # expect 202
+
+# 3. tools/list (P4)
+curl -X POST $URL/mcp -H "Authorization: Bearer $TOKEN" -H "Mcp-Session-Id: $SESSION" \
+  -H 'Content-Type: application/json' -H 'Accept: application/json, text/event-stream' \
+  -d '{"jsonrpc":"2.0","id":2,"method":"tools/list"}' | xxd | head -25
+# Verify: bytes show '5c 6e' (escaped \n) at every newline, NOT '0a' (raw LF) — FP-01 disproof
+```
+
+### Real-client gates (Phase 6, 7, 9)
+
+- **Inspector:** Open https://inspector.modelcontextprotocol.io, paste server URL + token, click Connect. Verify tools/resources/prompts list populates without errors. Take screenshot.
+- **Claude Code:** Add server to `~/.claude.json` `mcpServers`, restart, run `/mcp` to list. Verify tool execution against a known fixture.
+
+---
+
+## Appendix B: Why this plan is serial across consumers
+
+A natural objection: "Why not migrate all three consumers in parallel?" Three reasons:
+
+1. **The kit's API is unproven until at least one consumer ships against it.** Phase 6 is the gate that catches API mistakes. If Phase 7 or 9 ran simultaneously and the kit needed a breaking change, all three would block while it lands.
+2. **skills-mcp donates the OAuth code.** Until it's lifted out, vorrent and meridian can't migrate. Migration order is dictated by code donation order.
+3. **Pre-1.0 versioning works only if API breaks land between consumers, not within.** Tagging `v0.3.0` after skills-mcp validates the API; `v0.4.0` after vorrent re-validates; `v1.0.0` after meridian. Three checkpoints, three opportunities to break + fix before stable.
+
+Phase 10 (Skills update) and Phase 11 (Migration docs) CAN run in parallel with their predecessors — they're documentation and don't gate any code path.
+
+---
+
+## Appendix C: Glossary
+
+| Term | Meaning |
+|---|---|
+| **kit** | This library — `github.com/haakco/mcp-kit` |
+| **consumer** | A Go service that depends on the kit (skills-mcp, vorrent, meridian) |
+| **donor** | Consumer whose existing code is the source for a kit package (skills-mcp donates OAuth; vorrent donates middleware) |
+| **kitwiring** | Adapter layer in each consumer that wraps existing services in kit interfaces (`UserStore`, `AuditEmitter`, `AuthzService`) |
+| **cycle** | A phased E2E test session against a running MCP server (P0..P10), defined in `mcp-kit/docs/cycle-methodology.md` |
+| **real-client gate** | Mandatory cycle phase that uses Inspector or Claude Code, not curl |
+| **lessons-learned ID** | Stable reference for a known failure mode: TQ- (transport), OG- (OAuth), FP- (false positive), PR- (procedural), EG- (engineering gap) |
+| **dispatch runbook** | Per-cycle copy-paste recipe for executing each phase (template ships in kit) |
+| **same-branch concurrent** | Multi-agent execution model from HaakCo CLAUDE.md where teams share a branch but own non-overlapping file sets |
