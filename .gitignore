@@ -1,0 +1,22 @@
+# Binaries
+*.exe
+*.dll
+*.so
+*.dylib
+
+# Test
+*.test
+*.out
+coverage.txt
+coverage.html
+
+# Dependency directories
+vendor/
+
+# Editor
+.idea/
+.vscode/
+*.swp
+
+# OS
+.DS_Store
