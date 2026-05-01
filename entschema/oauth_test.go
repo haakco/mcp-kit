@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"entgo.io/ent"
+	_ "entgo.io/ent/dialect/sql/schema"
 
 	"github.com/haakco/mcp-kit/entschema"
 )

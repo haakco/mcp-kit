@@ -6,6 +6,8 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+
+	"github.com/haakco/mcp-kit/testkit"
 )
 
 func TestMinimalServerDiscoveryAndToolsList(t *testing.T) {
@@ -20,8 +22,16 @@ func TestMinimalServerDiscoveryAndToolsList(t *testing.T) {
 		t.Fatalf("discovery status = %d, want 200", discovery.Code)
 	}
 
-	request := httptest.NewRequest(http.MethodPost, "/mcp", strings.NewReader(`{"jsonrpc":"2.0","id":1,"method":"tools/list"}`))
+	server := httptest.NewServer(handler)
+	t.Cleanup(server.Close)
+	sessionID := testkit.RunHandshakeURL(t, server.URL+"/mcp", "example-token")
+
+	registered := testkit.ListToolsURL(t, server.URL+"/mcp", "example-token", sessionID)
+	testkit.AssertChecklistCoverage(t, registered, []string{"hello_world"})
+
+	request := httptest.NewRequest(http.MethodPost, "/mcp", strings.NewReader(`{"jsonrpc":"2.0","id":2,"method":"tools/list"}`))
 	request.Header.Set("Authorization", "Bearer example-token")
+	request.Header.Set("Mcp-Session-Id", sessionID)
 	response := httptest.NewRecorder()
 	handler.ServeHTTP(response, request)
 

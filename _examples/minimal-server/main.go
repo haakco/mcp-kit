@@ -109,6 +109,23 @@ func handleMCP(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "malformed payload: invalid JSON", http.StatusBadRequest)
 		return
 	}
+	if request.Method == "initialize" {
+		w.Header().Set("Mcp-Session-Id", "minimal-example-session")
+		writeJSON(w, map[string]any{
+			"jsonrpc": "2.0",
+			"id":      request.ID,
+			"result": map[string]any{
+				"protocolVersion": "2025-03-26",
+				"capabilities":    map[string]any{"tools": map[string]any{}},
+				"serverInfo":      map[string]any{"name": "minimal-server", "version": "0.0.0-example"},
+			},
+		})
+		return
+	}
+	if request.Method == "notifications/initialized" {
+		w.WriteHeader(http.StatusAccepted)
+		return
+	}
 	if request.Method != "tools/list" {
 		http.Error(w, "JSON RPC not handled: "+request.Method, http.StatusBadRequest)
 		return
