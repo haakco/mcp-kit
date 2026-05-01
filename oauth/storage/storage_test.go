@@ -10,6 +10,7 @@ import (
 	"github.com/ory/fosite/handler/oauth2"
 	oidcsession "github.com/ory/fosite/handler/openid"
 	"github.com/ory/fosite/handler/pkce"
+	fositestorage "github.com/ory/fosite/storage"
 
 	"github.com/haakco/mcp-kit/oauth/storage"
 )
@@ -19,6 +20,18 @@ func TestStorageInterfaceCompliance(t *testing.T) {
 	var _ oauth2.CoreStorage = storage.New(storage.NewMemoryStore())
 	var _ pkce.PKCERequestStorage = storage.New(storage.NewMemoryStore())
 	var _ oidcsession.OpenIDConnectRequestStorage = storage.New(storage.NewMemoryStore())
+	var _ fositestorage.Transactional = storage.New(storage.NewMemoryStore())
+}
+
+func TestStorageClientAssertionJWTFailsClosed(t *testing.T) {
+	store := storage.New(storage.NewMemoryStore())
+
+	if err := store.ClientAssertionJWTValid(t.Context(), "jti"); !errors.Is(err, fosite.ErrJTIKnown) {
+		t.Fatalf("ClientAssertionJWTValid() error = %v, want ErrJTIKnown", err)
+	}
+	if err := store.SetClientAssertionJWT(t.Context(), "jti", time.Now()); !errors.Is(err, fosite.ErrInvalidClient) {
+		t.Fatalf("SetClientAssertionJWT() error = %v, want ErrInvalidClient", err)
+	}
 }
 
 func TestStorageAuthCodeRoundtrip(t *testing.T) {

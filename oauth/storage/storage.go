@@ -14,6 +14,7 @@ import (
 	"github.com/ory/fosite/handler/oauth2"
 	"github.com/ory/fosite/handler/openid"
 	"github.com/ory/fosite/handler/pkce"
+	fositestorage "github.com/ory/fosite/storage"
 )
 
 const (
@@ -29,6 +30,7 @@ var (
 	_ oauth2.CoreStorage                 = (*Storage)(nil)
 	_ pkce.PKCERequestStorage            = (*Storage)(nil)
 	_ openid.OpenIDConnectRequestStorage = (*Storage)(nil)
+	_ fositestorage.Transactional        = (*Storage)(nil)
 )
 
 // ErrNotFound indicates the requested client or session row does not exist.
@@ -65,11 +67,20 @@ type Session struct {
 // concurrent use.
 type Store interface {
 	GetClient(ctx context.Context, clientID string) (Client, error)
+	SaveClient(ctx context.Context, client Client) error
 	SaveSession(ctx context.Context, session Session) error
 	GetSession(ctx context.Context, sessionType string, signature string) (Session, error)
 	SetSessionActive(ctx context.Context, sessionType string, signature string, active bool) error
 	DeleteSession(ctx context.Context, sessionType string, signature string) error
 	DeleteSessionsByRequestID(ctx context.Context, sessionType string, requestID string) error
+}
+
+// TransactionalStore is the optional transaction interface used by Fosite
+// during flows that require atomic storage semantics.
+type TransactionalStore interface {
+	BeginTX(ctx context.Context) (context.Context, error)
+	Commit(ctx context.Context) error
+	Rollback(ctx context.Context) error
 }
 
 // Storage implements Fosite storage interfaces.
@@ -94,13 +105,39 @@ func (s *Storage) GetClient(ctx context.Context, id string) (fosite.Client, erro
 	return clientWrapper{client: client}, nil
 }
 
-// ClientAssertionJWTValid is a no-op; JWT client authentication is not used yet.
+// ClientAssertionJWTValid fails closed because JWT client authentication is
+// not supported by the kit yet. Returning success here would disable JTI
+// replay protection if private_key_jwt were enabled later.
 func (*Storage) ClientAssertionJWTValid(context.Context, string) error {
+	return fosite.ErrJTIKnown
+}
+
+// SetClientAssertionJWT fails closed because JWT client authentication is not supported yet.
+func (*Storage) SetClientAssertionJWT(context.Context, string, time.Time) error {
+	return fosite.ErrInvalidClient
+}
+
+// BeginTX starts a transaction when the underlying store supports it.
+func (s *Storage) BeginTX(ctx context.Context) (context.Context, error) {
+	if txStore, ok := s.store.(TransactionalStore); ok {
+		return txStore.BeginTX(ctx)
+	}
+	return ctx, nil
+}
+
+// Commit commits a transaction when the underlying store supports it.
+func (s *Storage) Commit(ctx context.Context) error {
+	if txStore, ok := s.store.(TransactionalStore); ok {
+		return txStore.Commit(ctx)
+	}
 	return nil
 }
 
-// SetClientAssertionJWT is a no-op; JWT client authentication is not used yet.
-func (*Storage) SetClientAssertionJWT(context.Context, string, time.Time) error {
+// Rollback rolls back a transaction when the underlying store supports it.
+func (s *Storage) Rollback(ctx context.Context) error {
+	if txStore, ok := s.store.(TransactionalStore); ok {
+		return txStore.Rollback(ctx)
+	}
 	return nil
 }
 
