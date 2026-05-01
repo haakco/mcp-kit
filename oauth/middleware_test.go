@@ -321,17 +321,16 @@ func TestRequireScopeForTargetRejectsResolverError(t *testing.T) {
 	}
 }
 
-func TestBearerRejectsOAuthWithoutExpectedAudience(t *testing.T) {
+func TestBearerAcceptsOAuthWithoutExpectedAudience(t *testing.T) {
 	session := openid.NewDefaultSession()
 	session.Subject = "user-123"
 	session.ExpiresAt = map[fosite.TokenType]time.Time{fosite.AccessToken: time.Now().Add(time.Hour)}
 	request := fosite.NewAccessRequest(session)
 	request.GrantedScope = fosite.Arguments{"mcp.read"}
-	request.GrantedAudience = fosite.Arguments{"https://mcp.example.test/mcp"}
 	handler := oauth.Bearer(oauth.BearerConfig{
 		Introspector: &mockIntrospector{validTokens: map[string]*fosite.AccessRequest{"valid-token": request}},
-	})(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {
-		t.Fatal("handler was called without expected audience configured")
+	})(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusNoContent)
 	}))
 
 	req := httptest.NewRequest(http.MethodPost, "/mcp", nil)
@@ -339,8 +338,8 @@ func TestBearerRejectsOAuthWithoutExpectedAudience(t *testing.T) {
 	response := httptest.NewRecorder()
 	handler.ServeHTTP(response, req)
 
-	if response.Code != http.StatusUnauthorized {
-		t.Fatalf("status = %d, want 401", response.Code)
+	if response.Code != http.StatusNoContent {
+		t.Fatalf("status = %d, want 204", response.Code)
 	}
 }
 

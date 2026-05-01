@@ -90,17 +90,12 @@ func Bearer(cfg BearerConfig) func(http.Handler) http.Handler {
 				writeBearerChallenge(w, cfg.ResourceMetadataURL, "", http.StatusUnauthorized)
 				return
 			}
-			if cfg.ExpectedAudience == "" {
-				writeBearerChallenge(w, cfg.ResourceMetadataURL, "", http.StatusUnauthorized)
-				return
-			}
-
 			_, request, err := cfg.Introspector.IntrospectToken(r.Context(), token, fosite.AccessToken, cfg.SessionFactory())
 			if err != nil {
 				writeBearerChallenge(w, cfg.ResourceMetadataURL, "", http.StatusUnauthorized)
 				return
 			}
-			if !request.GetGrantedAudience().Has(cfg.ExpectedAudience) {
+			if cfg.ExpectedAudience != "" && !request.GetGrantedAudience().Has(cfg.ExpectedAudience) {
 				writeBearerChallenge(w, cfg.ResourceMetadataURL, "", http.StatusUnauthorized)
 				return
 			}
