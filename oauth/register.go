@@ -47,6 +47,8 @@ type RegistrationHandler struct {
 	allowedScope                   map[string]struct{}
 	audience                       string
 	defaultTokenEndpointAuthMethod string
+	defaultGrantTypes              []string
+	defaultResponseTypes           []string
 	clientIDPrefix                 string
 }
 
@@ -61,6 +63,8 @@ type RegistrationConfig struct {
 	AllowedScopes                  []string
 	Audience                       string
 	DefaultTokenEndpointAuthMethod string
+	DefaultGrantTypes              []string
+	DefaultResponseTypes           []string
 	ClientIDPrefix                 string
 }
 
@@ -76,6 +80,8 @@ func NewRegistrationHandler(cfg RegistrationConfig) http.Handler {
 		allowedScope:                   scopeSet(cfg.AllowedScopes),
 		audience:                       cfg.Audience,
 		defaultTokenEndpointAuthMethod: defaultAuthMethod,
+		defaultGrantTypes:              append([]string{}, cfg.DefaultGrantTypes...),
+		defaultResponseTypes:           append([]string{}, cfg.DefaultResponseTypes...),
 		clientIDPrefix:                 cfg.ClientIDPrefix,
 	}
 }
@@ -122,11 +128,11 @@ func (h *RegistrationHandler) process(r *http.Request, req registrationRequest) 
 		}
 	}
 
-	grantTypes, status, code, description := normalizeGrantTypes(req.GrantTypes)
+	grantTypes, status, code, description := h.normalizeGrantTypes(req.GrantTypes)
 	if code != "" {
 		return nil, status, code, description
 	}
-	responseTypes, status, code, description := normalizeResponseTypes(req.ResponseTypes)
+	responseTypes, status, code, description := h.normalizeResponseTypes(req.ResponseTypes)
 	if code != "" {
 		return nil, status, code, description
 	}
@@ -217,9 +223,12 @@ type registrationResponse struct {
 	Scope                   string   `json:"scope,omitempty"`
 }
 
-func normalizeGrantTypes(requested []string) ([]string, int, string, string) {
+func (h *RegistrationHandler) normalizeGrantTypes(requested []string) ([]string, int, string, string) {
 	if len(requested) == 0 {
-		requested = []string{"authorization_code"}
+		requested = h.defaultGrantTypes
+		if len(requested) == 0 {
+			requested = []string{"authorization_code"}
+		}
 	}
 	for _, grantType := range requested {
 		if _, ok := supportedGrantTypes[grantType]; !ok {
@@ -229,9 +238,12 @@ func normalizeGrantTypes(requested []string) ([]string, int, string, string) {
 	return append([]string{}, requested...), 0, "", ""
 }
 
-func normalizeResponseTypes(requested []string) ([]string, int, string, string) {
+func (h *RegistrationHandler) normalizeResponseTypes(requested []string) ([]string, int, string, string) {
 	if len(requested) == 0 {
-		requested = []string{"code"}
+		requested = h.defaultResponseTypes
+		if len(requested) == 0 {
+			requested = []string{"code"}
+		}
 	}
 	for _, responseType := range requested {
 		if _, ok := supportedResponseTypes[responseType]; !ok {

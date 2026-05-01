@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -206,6 +207,8 @@ func TestRegistrationHandlerCanDefaultPublicClientAuth(t *testing.T) {
 		AllowedScopes:                  []string{"mcp.read", "mcp.write", "offline_access"},
 		Audience:                       "https://mcp.example.test/mcp",
 		DefaultTokenEndpointAuthMethod: "none",
+		DefaultGrantTypes:              []string{"authorization_code", "refresh_token"},
+		DefaultResponseTypes:           []string{"code"},
 		ClientIDPrefix:                 "mcp-",
 	})
 
@@ -230,6 +233,12 @@ func TestRegistrationHandlerCanDefaultPublicClientAuth(t *testing.T) {
 	if got := payload["token_endpoint_auth_method"]; got != "none" {
 		t.Fatalf("token_endpoint_auth_method = %#v, want none", got)
 	}
+	if got := stringSliceFromPayload(t, payload, "grant_types"); !slices.Equal(got, []string{"authorization_code", "refresh_token"}) {
+		t.Fatalf("grant_types = %#v, want authorization_code refresh_token", got)
+	}
+	if got := stringSliceFromPayload(t, payload, "response_types"); !slices.Equal(got, []string{"code"}) {
+		t.Fatalf("response_types = %#v, want code", got)
+	}
 	if _, ok := payload["client_secret"]; ok {
 		t.Fatalf("public registration returned client_secret: %#v", payload)
 	}
@@ -246,6 +255,24 @@ func TestRegistrationHandlerCanDefaultPublicClientAuth(t *testing.T) {
 	if client.TokenAuthMethod != "none" {
 		t.Fatalf("stored token auth method = %q, want none", client.TokenAuthMethod)
 	}
+}
+
+func stringSliceFromPayload(t *testing.T, payload map[string]any, field string) []string {
+	t.Helper()
+
+	raw, ok := payload[field].([]any)
+	if !ok {
+		t.Fatalf("%s = %#v, want array", field, payload[field])
+	}
+	values := make([]string, 0, len(raw))
+	for _, item := range raw {
+		value, ok := item.(string)
+		if !ok {
+			t.Fatalf("%s contains %#v, want string", field, item)
+		}
+		values = append(values, value)
+	}
+	return values
 }
 
 func TestRegisterRejectsUnsafeRedirectSchemes(t *testing.T) {
