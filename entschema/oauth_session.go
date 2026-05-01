@@ -50,10 +50,6 @@ func (oauthSession) Fields() []ent.Field {
 			Optional().
 			Nillable().
 			Comment("When this session expires"),
-		field.Time("requested_at").
-			Optional().
-			Nillable().
-			Comment("When Fosite created the original request"),
 	}
 }
 

@@ -51,15 +51,14 @@ type Client struct {
 
 // Session stores the serializable Fosite request state.
 type Session struct {
-	Type        string
-	Signature   string
-	ClientID    string
-	RequestID   string
-	Scopes      []string
-	Data        map[string]any
-	Active      bool
-	ExpiresAt   *time.Time
-	RequestedAt time.Time
+	Type      string
+	Signature string
+	ClientID  string
+	RequestID string
+	Scopes    []string
+	Data      map[string]any
+	Active    bool
+	ExpiresAt *time.Time
 }
 
 // Store persists OAuth clients and sessions. Implementations must be safe for
@@ -235,17 +234,13 @@ func (s *Storage) createSession(ctx context.Context, sessionType string, signatu
 	}
 
 	session := Session{
-		Type:        sessionType,
-		Signature:   signature,
-		ClientID:    requester.GetClient().GetID(),
-		RequestID:   requester.GetID(),
-		Scopes:      append([]string{}, requester.GetGrantedScopes()...),
-		Data:        data,
-		Active:      true,
-		RequestedAt: time.Now().UTC(),
-	}
-	if !requester.GetRequestedAt().IsZero() {
-		session.RequestedAt = requester.GetRequestedAt()
+		Type:      sessionType,
+		Signature: signature,
+		ClientID:  requester.GetClient().GetID(),
+		RequestID: requester.GetID(),
+		Scopes:    append([]string{}, requester.GetGrantedScopes()...),
+		Data:      data,
+		Active:    true,
 	}
 	if requester.GetSession() != nil {
 		if expiresAt := requester.GetSession().GetExpiresAt(fosite.AccessToken); !expiresAt.IsZero() {
@@ -314,7 +309,10 @@ func (s *Storage) rowToRequester(ctx context.Context, row Session, session fosit
 		requestedScopes = append(fosite.Arguments{}, stored.RequestedScopes...)
 	}
 
-	requestedAt := row.RequestedAt
+	requestedAt := stored.RequestedAt
+	if requestedAt.IsZero() {
+		requestedAt = time.Now().UTC()
+	}
 	return &fosite.Request{
 		ID:                row.RequestID,
 		RequestedAt:       requestedAt,
@@ -356,6 +354,7 @@ func (c clientWrapper) IsPublic() bool { return c.client.IsPublic }
 type storedRequestData struct {
 	Session           map[string]any      `json:"session,omitempty"`
 	Form              map[string][]string `json:"form,omitempty"`
+	RequestedAt       time.Time           `json:"requestedAt,omitempty"`
 	RequestedScopes   []string            `json:"requestedScopes,omitempty"`
 	GrantedScopes     []string            `json:"grantedScopes,omitempty"`
 	RequestedAudience []string            `json:"requestedAudience,omitempty"`
@@ -364,11 +363,15 @@ type storedRequestData struct {
 
 func marshalRequestData(requester fosite.Requester) (map[string]any, error) {
 	stored := storedRequestData{
+		RequestedAt:       requester.GetRequestedAt(),
 		RequestedScopes:   append([]string{}, requester.GetRequestedScopes()...),
 		GrantedScopes:     append([]string{}, requester.GetGrantedScopes()...),
 		RequestedAudience: append([]string{}, requester.GetRequestedAudience()...),
 		GrantedAudience:   append([]string{}, requester.GetGrantedAudience()...),
 		Form:              map[string][]string{},
+	}
+	if stored.RequestedAt.IsZero() {
+		stored.RequestedAt = time.Now().UTC()
 	}
 	for key, values := range sanitizeRequestForm(requester.GetRequestForm()) {
 		stored.Form[key] = append([]string{}, values...)

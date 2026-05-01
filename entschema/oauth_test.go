@@ -55,7 +55,6 @@ func TestOAuthSessionMixinFieldsAndIndexes(t *testing.T) {
 		"session_data",
 		"active",
 		"expires_at",
-		"requested_at",
 	})
 	assertIndex(t, mixin, []string{"session_type", "signature"}, true)
 	assertIndex(t, mixin, []string{"client_id"}, false)
@@ -117,9 +116,6 @@ func TestOAuthSessionFieldDescriptors(t *testing.T) {
 	}
 	if fields["session_data"].Default == nil {
 		t.Fatal("session_data Default is nil, want empty JSON default")
-	}
-	if !fields["requested_at"].Optional || !fields["requested_at"].Nillable {
-		t.Fatal("requested_at must be optional and nillable")
 	}
 }
 
