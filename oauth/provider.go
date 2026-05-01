@@ -82,12 +82,11 @@ func (p *Provider) OAuth2Provider() fosite.OAuth2Provider {
 
 // RegisterHandler returns the dynamic client registration handler.
 func (p *Provider) RegisterHandler() http.Handler {
-	return &RegistrationHandler{
-		store:         p.store,
-		allowedScopes: p.allowedScopes,
-		allowedScope:  p.allowedScope,
-		audience:      p.audience,
-	}
+	return NewRegistrationHandler(RegistrationConfig{
+		Store:         p.store,
+		AllowedScopes: p.allowedScopes,
+		Audience:      p.audience,
+	})
 }
 
 func scopeSet(scopes []string) map[string]struct{} {

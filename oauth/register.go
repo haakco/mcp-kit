@@ -1,6 +1,7 @@
 package oauth
 
 import (
+	"context"
 	"crypto/rand"
 	"encoding/base64"
 	"encoding/json"
@@ -41,10 +42,42 @@ var (
 
 // RegistrationHandler implements RFC 7591 dynamic client registration.
 type RegistrationHandler struct {
-	store         storage.Store
-	allowedScopes []string
-	allowedScope  map[string]struct{}
-	audience      string
+	store                          ClientRegistrar
+	allowedScopes                  []string
+	allowedScope                   map[string]struct{}
+	audience                       string
+	defaultTokenEndpointAuthMethod string
+	clientIDPrefix                 string
+}
+
+// ClientRegistrar persists dynamically registered OAuth clients.
+type ClientRegistrar interface {
+	SaveClient(context.Context, storage.Client) error
+}
+
+// RegistrationConfig configures a dynamic client registration handler.
+type RegistrationConfig struct {
+	Store                          ClientRegistrar
+	AllowedScopes                  []string
+	Audience                       string
+	DefaultTokenEndpointAuthMethod string
+	ClientIDPrefix                 string
+}
+
+// NewRegistrationHandler creates an RFC 7591 dynamic client registration handler.
+func NewRegistrationHandler(cfg RegistrationConfig) http.Handler {
+	defaultAuthMethod := strings.TrimSpace(cfg.DefaultTokenEndpointAuthMethod)
+	if defaultAuthMethod == "" {
+		defaultAuthMethod = authMethodClientSecretBasic
+	}
+	return &RegistrationHandler{
+		store:                          cfg.Store,
+		allowedScopes:                  append([]string{}, cfg.AllowedScopes...),
+		allowedScope:                   scopeSet(cfg.AllowedScopes),
+		audience:                       cfg.Audience,
+		defaultTokenEndpointAuthMethod: defaultAuthMethod,
+		clientIDPrefix:                 cfg.ClientIDPrefix,
+	}
 }
 
 func (h *RegistrationHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -97,7 +130,7 @@ func (h *RegistrationHandler) process(r *http.Request, req registrationRequest) 
 	if code != "" {
 		return nil, status, code, description
 	}
-	authMethod, status, code, description := normalizeAuthMethod(req.TokenEndpointAuthMethod)
+	authMethod, status, code, description := h.normalizeAuthMethod(req.TokenEndpointAuthMethod)
 	if code != "" {
 		return nil, status, code, description
 	}
@@ -114,7 +147,7 @@ func (h *RegistrationHandler) process(r *http.Request, req registrationRequest) 
 		clientName = clientName[:maxClientNameLen]
 	}
 
-	clientID := generateRandomURLValue(24)
+	clientID := h.clientIDPrefix + generateRandomURLValue(24)
 	isPublic := authMethod == authMethodNone
 	var rawSecret string
 	var secretHash string
@@ -207,9 +240,9 @@ func normalizeResponseTypes(requested []string) ([]string, int, string, string) 
 	return append([]string{}, requested...), 0, "", ""
 }
 
-func normalizeAuthMethod(requested string) (string, int, string, string) {
+func (h *RegistrationHandler) normalizeAuthMethod(requested string) (string, int, string, string) {
 	if requested == "" {
-		requested = authMethodClientSecretBasic
+		requested = h.defaultTokenEndpointAuthMethod
 	}
 	if _, ok := supportedAuthMethods[requested]; !ok {
 		return "", http.StatusBadRequest, "invalid_client_metadata", fmt.Sprintf("token_endpoint_auth_method %q is not supported", requested)

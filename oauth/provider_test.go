@@ -199,6 +199,52 @@ func TestRegisterDefaultsOmittedScopeToAllowedScopes(t *testing.T) {
 	}
 }
 
+func TestRegistrationHandlerCanDefaultPublicClientAuth(t *testing.T) {
+	store := storage.NewMemoryStore()
+	handler := oauth.NewRegistrationHandler(oauth.RegistrationConfig{
+		Store:                          store,
+		AllowedScopes:                  []string{"mcp.read", "mcp.write", "offline_access"},
+		Audience:                       "https://mcp.example.test/mcp",
+		DefaultTokenEndpointAuthMethod: "none",
+		ClientIDPrefix:                 "mcp-",
+	})
+
+	request := httptest.NewRequest(http.MethodPost, "/oauth/register", strings.NewReader(`{
+		"redirect_uris":["http://127.0.0.1/callback"]
+	}`))
+	response := httptest.NewRecorder()
+
+	handler.ServeHTTP(response, request)
+
+	if response.Code != http.StatusCreated {
+		t.Fatalf("status = %d, want 201; body=%s", response.Code, response.Body.String())
+	}
+	var payload map[string]any
+	if err := json.NewDecoder(response.Body).Decode(&payload); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	clientID, _ := payload["client_id"].(string)
+	if !strings.HasPrefix(clientID, "mcp-") {
+		t.Fatalf("client_id = %q, want mcp- prefix", clientID)
+	}
+	if got := payload["token_endpoint_auth_method"]; got != "none" {
+		t.Fatalf("token_endpoint_auth_method = %#v, want none", got)
+	}
+	if _, ok := payload["client_secret"]; ok {
+		t.Fatalf("public registration returned client_secret: %#v", payload)
+	}
+	client, err := store.GetClient(t.Context(), clientID)
+	if err != nil {
+		t.Fatalf("GetClient() error = %v", err)
+	}
+	if !client.IsPublic {
+		t.Fatal("stored client IsPublic = false, want true")
+	}
+	if client.ClientSecretHash != "" {
+		t.Fatalf("stored client secret hash = %q, want empty", client.ClientSecretHash)
+	}
+}
+
 func TestRegisterRejectsUnsafeRedirectSchemes(t *testing.T) {
 	store := storage.NewMemoryStore()
 	provider := newTestProvider(t, store)
