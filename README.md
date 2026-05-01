@@ -75,14 +75,16 @@ func main() {
 - [DESIGN.md](DESIGN.md) — full design rationale, package layout, public API
 - [docs/migration/skills-mcp.md](docs/migration/skills-mcp.md) — *(coming with v0.2.0)* migrating from skills-mcp's vendored OAuth
 - [docs/migration/vorrent.md](docs/migration/vorrent.md) — *(coming with v0.2.0)* migrating from Vorrent's vendored MCP server
-- [docs/cycle-methodology.md](docs/cycle-methodology.md) — *(coming with v0.3.0)* the E2E testing protocol
+- [docs/cycle-methodology.md](docs/cycle-methodology.md) — the E2E testing protocol
+- [docs/lessons.md](docs/lessons.md) — reusable MCP OAuth, JSON-RPC, and transport lessons
+- [docs/dispatch-runbook-template.md](docs/dispatch-runbook-template.md) — live-client runbook template for consumers
 
 ## Status
 
 | Phase | Status |
 |---|---|
 | Design | ✅ — see [DESIGN.md](DESIGN.md) |
-| v0.1.0 spike — package skeletons + envelope middleware | 🚧 In progress |
+| v0.1.0 spike — package skeletons + envelope middleware | ✅ Complete |
 | v0.2.0 — OAuth core extracted from skills-mcp | Planned |
 | v0.3.0 — skills-mcp migrated to kit | Planned |
 | v0.4.0 — Vorrent migrated to kit | Planned |
