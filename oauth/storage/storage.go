@@ -47,6 +47,7 @@ type Client struct {
 	Audience         []string
 	IsPublic         bool
 	ClientSecretHash string
+	TokenAuthMethod  string
 }
 
 // Session stores the serializable Fosite request state.

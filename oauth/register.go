@@ -171,6 +171,7 @@ func (h *RegistrationHandler) process(r *http.Request, req registrationRequest) 
 		Scopes:           scopes,
 		Audience:         []string{h.audience},
 		IsPublic:         isPublic,
+		TokenAuthMethod:  authMethod,
 	}
 	if err := h.store.SaveClient(r.Context(), client); err != nil {
 		slog.Error("persist oauth client", "error", err, "client_id", clientID)

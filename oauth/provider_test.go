@@ -243,6 +243,9 @@ func TestRegistrationHandlerCanDefaultPublicClientAuth(t *testing.T) {
 	if client.ClientSecretHash != "" {
 		t.Fatalf("stored client secret hash = %q, want empty", client.ClientSecretHash)
 	}
+	if client.TokenAuthMethod != "none" {
+		t.Fatalf("stored token auth method = %q, want none", client.TokenAuthMethod)
+	}
 }
 
 func TestRegisterRejectsUnsafeRedirectSchemes(t *testing.T) {
