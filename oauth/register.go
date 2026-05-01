@@ -53,7 +53,7 @@ func (h *RegistrationHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) 
 	}
 
 	r.Body = http.MaxBytesReader(w, r.Body, maxRegistrationBodyBytes)
-	defer r.Body.Close()
+	defer func() { _ = r.Body.Close() }()
 
 	var req registrationRequest
 	decoder := json.NewDecoder(r.Body)

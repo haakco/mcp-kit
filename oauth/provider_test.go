@@ -200,7 +200,7 @@ func TestAuthorizationCodePKCEFlow(t *testing.T) {
 	code := authorizeCode(t, server, verifier, "state-123456")
 
 	tokenResponse := exchangeCode(t, server, code, verifier)
-	defer tokenResponse.Body.Close()
+	defer func() { _ = tokenResponse.Body.Close() }()
 	if tokenResponse.StatusCode != http.StatusOK {
 		t.Fatalf("token status = %d, want 200", tokenResponse.StatusCode)
 	}
@@ -228,7 +228,7 @@ func TestAuthorizeRejectsBadState(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GET authorize: %v", err)
 	}
-	defer response.Body.Close()
+	defer func() { _ = response.Body.Close() }()
 	if response.StatusCode == http.StatusSeeOther {
 		t.Fatal("authorize accepted short state, want rejection")
 	}
@@ -253,7 +253,7 @@ func TestAuthorizeRejectsBadPKCE(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GET authorize: %v", err)
 	}
-	defer response.Body.Close()
+	defer func() { _ = response.Body.Close() }()
 	if response.StatusCode == http.StatusSeeOther {
 		t.Fatal("authorize accepted invalid code_challenge, want rejection")
 	}
@@ -268,7 +268,7 @@ func TestTokenRejectsBadPKCE(t *testing.T) {
 
 	code := authorizeCode(t, server, "test-code-verifier-1234567890-must-be-at-least-43-characters-long", "state-123456")
 	response := exchangeCode(t, server, code, "wrong-code-verifier-1234567890-must-be-at-least-43-characters-long")
-	defer response.Body.Close()
+	defer func() { _ = response.Body.Close() }()
 	if response.StatusCode == http.StatusOK {
 		t.Fatal("token exchange accepted wrong PKCE verifier")
 	}
@@ -286,14 +286,14 @@ func TestRefreshTokenRotation(t *testing.T) {
 	refreshToken := decodeTokenField(t, tokenResponse, "refresh_token")
 
 	rotated := refreshTokenRequest(t, server.URL, refreshToken)
-	defer rotated.Body.Close()
+	defer func() { _ = rotated.Body.Close() }()
 	if rotated.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(rotated.Body)
 		t.Fatalf("refresh status = %d, want 200; body=%s", rotated.StatusCode, string(body))
 	}
 
 	reused := refreshTokenRequest(t, server.URL, refreshToken)
-	defer reused.Body.Close()
+	defer func() { _ = reused.Body.Close() }()
 	if reused.StatusCode == http.StatusOK {
 		t.Fatal("refresh token reuse succeeded, want rotation to invalidate old token")
 	}
@@ -308,7 +308,7 @@ func TestTokenInvalidGrantEnvelopeOnPKCEFailure(t *testing.T) {
 
 	code := authorizeCode(t, server, "test-code-verifier-1234567890-must-be-at-least-43-characters-long", "state-123456")
 	response := exchangeCode(t, server, code, "wrong-code-verifier-1234567890-must-be-at-least-43-characters-long")
-	defer response.Body.Close()
+	defer func() { _ = response.Body.Close() }()
 
 	var payload map[string]any
 	if err := json.NewDecoder(response.Body).Decode(&payload); err != nil {
@@ -336,7 +336,7 @@ func TestRevokeIdempotentSuccess(t *testing.T) {
 	if err != nil {
 		t.Fatalf("POST revoke: %v", err)
 	}
-	defer response.Body.Close()
+	defer func() { _ = response.Body.Close() }()
 	if response.StatusCode != http.StatusOK {
 		t.Fatalf("revoke status = %d, want 200", response.StatusCode)
 	}
@@ -396,7 +396,7 @@ func authorizeCode(t *testing.T, server *httptest.Server, verifier string, state
 	if err != nil {
 		t.Fatalf("GET authorize: %v", err)
 	}
-	defer response.Body.Close()
+	defer func() { _ = response.Body.Close() }()
 	if response.StatusCode != http.StatusSeeOther {
 		t.Fatalf("authorize status = %d, want 303", response.StatusCode)
 	}
@@ -459,7 +459,7 @@ func refreshTokenRequest(t *testing.T, serverURL string, refreshToken string) *h
 
 func decodeTokenField(t *testing.T, response *http.Response, field string) string {
 	t.Helper()
-	defer response.Body.Close()
+	defer func() { _ = response.Body.Close() }()
 	if response.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(response.Body)
 		t.Fatalf("token status = %d, want 200; body=%s", response.StatusCode, string(body))

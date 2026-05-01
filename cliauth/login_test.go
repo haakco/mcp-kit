@@ -332,7 +332,7 @@ func newSimulatedPaste(t *testing.T, capturedCh <-chan string) io.Reader {
 	t.Helper()
 	pr, pw := io.Pipe()
 	go func() {
-		defer pw.Close()
+		defer func() { _ = pw.Close() }()
 		var captured string
 		select {
 		case captured = <-capturedCh:
@@ -350,7 +350,7 @@ func newSimulatedPaste(t *testing.T, capturedCh <-chan string) io.Reader {
 			_ = pw.CloseWithError(err)
 			return
 		}
-		defer resp.Body.Close()
+		defer func() { _ = resp.Body.Close() }()
 		loc := resp.Header.Get("Location")
 		if loc == "" {
 			_ = pw.CloseWithError(fmt.Errorf("authorize did not redirect: %d", resp.StatusCode))

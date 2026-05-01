@@ -40,7 +40,7 @@ func postToken(ctx context.Context, httpClient *http.Client, endpoint string, fo
 	if err != nil {
 		return nil, fmt.Errorf("token request: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode/100 != 2 {
 		body, _ := io.ReadAll(resp.Body)
 		return nil, fmt.Errorf("token endpoint %s: %s", resp.Status, strings.TrimSpace(string(body)))
@@ -85,11 +85,11 @@ func startLoopbackCallback(listener net.Listener) (<-chan loopbackCallbackResult
 		q := r.URL.Query()
 		if errCode := q.Get("error"); errCode != "" {
 			desc := q.Get("error_description")
-			fmt.Fprint(w, callbackErrorPage(errCode, desc))
+			_, _ = fmt.Fprint(w, callbackErrorPage(errCode, desc))
 			resCh <- loopbackCallbackResult{err: fmt.Errorf("authorize error: %s: %s", errCode, desc)}
 			return
 		}
-		fmt.Fprint(w, callbackSuccessPage)
+		_, _ = fmt.Fprint(w, callbackSuccessPage)
 		resCh <- loopbackCallbackResult{code: q.Get("code"), state: q.Get("state")}
 	})
 	srv := &http.Server{Handler: mux, ReadHeaderTimeout: 5 * time.Second}

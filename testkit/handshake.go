@@ -75,7 +75,7 @@ func postMCP(t testing.TB, mcpURL string, token string, sessionID string, payloa
 	if err != nil {
 		t.Fatalf("POST %s: %v", mcpURL, err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	bodyBytes, err := io.ReadAll(resp.Body)
 	if err != nil {
 		t.Fatalf("read MCP response: %v", err)

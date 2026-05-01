@@ -27,7 +27,7 @@ func discoverEndpoints(ctx context.Context, httpClient *http.Client, issuer stri
 	if err != nil {
 		return Endpoints{}, fmt.Errorf("issuer metadata request: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode/100 != 2 {
 		return Endpoints{}, fmt.Errorf("issuer metadata failed: %s", resp.Status)
 	}

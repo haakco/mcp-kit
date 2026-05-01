@@ -139,7 +139,7 @@ func (l *Login) RunLoopback(ctx context.Context, opts LoopbackOptions) error {
 	if err != nil {
 		return fmt.Errorf("bind callback listener: %w", err)
 	}
-	defer listener.Close()
+	defer func() { _ = listener.Close() }()
 
 	port := listener.Addr().(*net.TCPAddr).Port
 	authRequest, err := l.prepareAuthRequest(ctx, port, scope)
@@ -192,11 +192,9 @@ func (l *Login) RunPasteRedirect(ctx context.Context, opts PasteOptions) error {
 	if err != nil {
 		return err
 	}
-	fmt.Fprintln(opts.Out, "Open this URL in any browser:")
-	fmt.Fprintln(opts.Out, "")
-	fmt.Fprintln(opts.Out, "    "+authRequest.URL)
-	fmt.Fprintln(opts.Out, "")
-	fmt.Fprintln(opts.Out, "After approving, paste the full redirect URL here:")
+	if err := writePasteInstructions(opts.Out, authRequest.URL); err != nil {
+		return err
+	}
 	_ = l.openURL(authRequest.URL) //nolint:errcheck // courtesy browser open; paste flow remains usable on failure
 
 	code, err := readPastedRedirect(opts.In, authRequest.State)
@@ -333,7 +331,7 @@ func (l *Login) ensureRegistered(ctx context.Context, endpoints Endpoints, redir
 	if err != nil {
 		return "", fmt.Errorf("dcr request: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode/100 != 2 {
 		respBody, _ := io.ReadAll(resp.Body)
 		return "", fmt.Errorf("dcr failed: %s: %s", resp.Status, strings.TrimSpace(string(respBody)))
@@ -353,6 +351,22 @@ func (l *Login) ensureRegistered(ctx context.Context, endpoints Endpoints, redir
 		return "", err
 	}
 	return dcr.ClientID, nil
+}
+
+func writePasteInstructions(out io.Writer, authorizeURL string) error {
+	lines := []string{
+		"Open this URL in any browser:",
+		"",
+		"    " + authorizeURL,
+		"",
+		"After approving, paste the full redirect URL here:",
+	}
+	for _, line := range lines {
+		if _, err := fmt.Fprintln(out, line); err != nil {
+			return fmt.Errorf("write paste instructions: %w", err)
+		}
+	}
+	return nil
 }
 
 type exchangeParams struct {
