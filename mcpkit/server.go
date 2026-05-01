@@ -5,6 +5,8 @@ import (
 	"net/http"
 
 	"github.com/haakco/mcp-kit/audit"
+	"github.com/haakco/mcp-kit/mcpmw"
+	"github.com/haakco/mcp-kit/oauth"
 )
 
 // ErrNotImplemented is returned by symbols that are stubbed in v0.1.0.
@@ -24,9 +26,14 @@ type Config struct {
 	// Instructions are the server-level guidance shown to clients on initialize.
 	Instructions string
 
-	// Validator authenticates bearer tokens. Required when v0.2.0 lands.
-	// Typically obtained from oauth.Provider.TokenValidator().
-	Validator any // oauth.TokenValidator in v0.2.0
+	// Handler is the SDK MCP HTTP handler before kit middleware.
+	Handler http.Handler
+
+	// Bearer authenticates bearer tokens before the SDK handler.
+	Bearer BearerConfig
+
+	// Validator is deprecated. Use Bearer.TokenValidator.
+	Validator oauth.TokenValidator
 
 	// AllowedOrigins is the Origin header allowlist for browser clients.
 	AllowedOrigins []string
@@ -42,23 +49,33 @@ type Config struct {
 
 // Server wraps the SDK MCP server with the kit's middleware composed.
 type Server struct {
-	cfg Config
+	cfg     Config
+	handler http.Handler
 }
 
 // New constructs an MCP server from the given config.
-//
-// v0.1.0: returns ErrNotImplemented. v0.2.0 will compose the SDK server with
-// origin → bearer → envelope → SDK handler chain.
 func New(cfg Config) (*Server, error) {
-	return nil, ErrNotImplemented
+	if cfg.Handler == nil {
+		return nil, errors.New("mcpkit: handler is required")
+	}
+	if cfg.Bearer.TokenValidator == nil {
+		cfg.Bearer.TokenValidator = cfg.Validator
+	}
+
+	handler := mcpmw.Envelope(cfg.Handler)
+	handler = oauth.Bearer(oauth.BearerConfig(cfg.Bearer))(handler)
+	handler = mcpmw.Origin(mcpmw.OriginConfig{
+		Allowed:       cfg.AllowedOrigins,
+		AllowLoopback: cfg.AllowLoopback,
+	}, handler)
+
+	return &Server{cfg: cfg, handler: handler}, nil
 }
 
 // Handler returns the http.Handler to mount at /mcp.
-//
-// v0.1.0: returns a handler that responds with 501 to every request.
-// v0.2.0 will return the composed handler.
 func (s *Server) Handler() http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		http.Error(w, "mcpkit: server not implemented in v0.1.0", http.StatusNotImplemented)
-	})
+	return s.handler
 }
+
+// BearerConfig is an alias for oauth.BearerConfig.
+type BearerConfig = oauth.BearerConfig
