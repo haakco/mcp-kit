@@ -139,7 +139,7 @@ func (r *Rotator) rotateAndCleanup(ctx context.Context) {
 		r.logger.Error("rotate signing key failed", "error", err)
 	}
 
-	deleted, err := r.manager.RetireExpiredKeys(ctx)
+	deleted, err := r.manager.retireExpiredKeysAt(ctx, r.cfg.Now)
 	if err != nil {
 		r.logger.Error("retire expired keys failed", "error", err)
 		return

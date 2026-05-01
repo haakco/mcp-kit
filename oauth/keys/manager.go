@@ -37,8 +37,10 @@ type SigningKey struct {
 }
 
 // Store persists signing keys for Manager. Implementations must make
-// RotateSigningKey atomic: the previous active key is retired and the
-// replacement key is created as one storage operation.
+// EnsureSigningKey atomic: when an active key already exists, return it;
+// otherwise create the supplied key as the only active key. Implementations
+// must also make RotateSigningKey atomic: the previous active key is retired
+// and the replacement key is created as one storage operation.
 type Store interface {
 	FindActiveSigningKey(ctx context.Context) (SigningKey, error)
 	EnsureSigningKey(ctx context.Context, key SigningKey) (SigningKey, error)
@@ -147,7 +149,11 @@ func (m *Manager) rotateSigningKeyAt(ctx context.Context, grace time.Duration, n
 
 // RetireExpiredKeys deletes signing keys whose retired_at is in the past.
 func (m *Manager) RetireExpiredKeys(ctx context.Context) (int, error) {
-	deleted, err := m.store.DeleteExpiredSigningKeys(ctx, m.now())
+	return m.retireExpiredKeysAt(ctx, m.now)
+}
+
+func (m *Manager) retireExpiredKeysAt(ctx context.Context, now func() time.Time) (int, error) {
+	deleted, err := m.store.DeleteExpiredSigningKeys(ctx, now())
 	if err != nil {
 		return 0, fmt.Errorf("delete expired signing keys: %w", err)
 	}
