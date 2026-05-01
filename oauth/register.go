@@ -43,6 +43,7 @@ var (
 type RegistrationHandler struct {
 	store        storage.Store
 	allowedScope map[string]struct{}
+	audience     string
 }
 
 func (h *RegistrationHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -118,7 +119,12 @@ func (h *RegistrationHandler) process(r *http.Request, req registrationRequest) 
 	var secretHash string
 	if !isPublic {
 		rawSecret = generateRandomURLValue(clientSecretRandomBytes)
-		secretHash = rawSecret
+		var err error
+		secretHash, err = HashSecret(rawSecret)
+		if err != nil {
+			slog.Error("hash oauth client secret", "error", err, "client_id", clientID)
+			return nil, http.StatusInternalServerError, "server_error", "failed to create client secret"
+		}
 	}
 
 	client := storage.Client{
@@ -129,6 +135,7 @@ func (h *RegistrationHandler) process(r *http.Request, req registrationRequest) 
 		GrantTypes:       grantTypes,
 		ResponseTypes:    responseTypes,
 		Scopes:           scopes,
+		Audience:         []string{h.audience},
 		IsPublic:         isPublic,
 	}
 	if err := h.store.SaveClient(r.Context(), client); err != nil {

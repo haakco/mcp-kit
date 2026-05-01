@@ -17,6 +17,7 @@ type Provider struct {
 	oauth        fosite.OAuth2Provider
 	store        storage.Store
 	issuer       string
+	audience     string
 	allowedScope map[string]struct{}
 }
 
@@ -67,6 +68,7 @@ func New(cfg Config) (*Provider, error) {
 		oauth:        fositeProvider,
 		store:        cfg.Store,
 		issuer:       cfg.Issuer,
+		audience:     cfg.Audience,
 		allowedScope: scopeSet(cfg.AllowedScopes),
 	}, nil
 }
@@ -78,7 +80,7 @@ func (p *Provider) OAuth2Provider() fosite.OAuth2Provider {
 
 // RegisterHandler returns the dynamic client registration handler.
 func (p *Provider) RegisterHandler() http.Handler {
-	return &RegistrationHandler{store: p.store, allowedScope: p.allowedScope}
+	return &RegistrationHandler{store: p.store, allowedScope: p.allowedScope, audience: p.audience}
 }
 
 func scopeSet(scopes []string) map[string]struct{} {

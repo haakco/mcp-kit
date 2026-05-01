@@ -10,8 +10,9 @@ import (
 
 // Subject is the authenticated resource owner authorizing an OAuth client.
 type Subject struct {
-	ID    string
-	Email string
+	ID            string
+	Email         string
+	GrantedScopes []string
 }
 
 // NewSession creates an OIDC session for subject.

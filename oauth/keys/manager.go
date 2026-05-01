@@ -78,6 +78,14 @@ func NewManager(store Store, opts ...ManagerOption) *Manager {
 
 // EnsureSigningKey generates and persists a signing key if none exists.
 func (m *Manager) EnsureSigningKey(ctx context.Context) (SigningKey, error) {
+	active, err := m.store.FindActiveSigningKey(ctx)
+	if err == nil {
+		return active, nil
+	}
+	if !errors.Is(err, ErrNotFound) {
+		return SigningKey{}, fmt.Errorf("query active signing key: %w", err)
+	}
+
 	key, err := generateSigningKey(m.now)
 	if err != nil {
 		return SigningKey{}, err

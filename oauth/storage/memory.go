@@ -2,6 +2,7 @@ package storage
 
 import (
 	"context"
+	"encoding/json"
 	"sync"
 )
 
@@ -121,9 +122,13 @@ func cloneMap(value map[string]any) map[string]any {
 	if value == nil {
 		return nil
 	}
-	cloned := map[string]any{}
-	for key, item := range value {
-		cloned[key] = item
+	data, err := json.Marshal(value)
+	if err != nil {
+		panic("oauth storage: clone session data: " + err.Error())
+	}
+	var cloned map[string]any
+	if err := json.Unmarshal(data, &cloned); err != nil {
+		panic("oauth storage: clone session data: " + err.Error())
 	}
 	return cloned
 }

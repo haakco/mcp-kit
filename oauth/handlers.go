@@ -1,8 +1,10 @@
 package oauth
 
 import (
-	"log/slog"
+	"encoding/base64"
 	"net/http"
+
+	"github.com/ory/fosite"
 )
 
 // SubjectResolver returns the authenticated subject for an authorize request.
@@ -22,6 +24,10 @@ func (p *Provider) AuthorizeHandler(resolve SubjectResolver) http.Handler {
 			http.Error(w, "invalid_state", http.StatusBadRequest)
 			return
 		}
+		if !validCodeChallenge(r.URL.Query().Get("code_challenge"), r.URL.Query().Get("code_challenge_method")) {
+			http.Error(w, "invalid_code_challenge", http.StatusBadRequest)
+			return
+		}
 
 		requester, err := p.oauth.NewAuthorizeRequest(ctx, r)
 		if err != nil {
@@ -34,9 +40,8 @@ func (p *Provider) AuthorizeHandler(resolve SubjectResolver) http.Handler {
 			p.oauth.WriteAuthorizeError(ctx, w, requester, err)
 			return
 		}
-		for _, scope := range requester.GetRequestedScopes() {
-			requester.GrantScope(scope)
-		}
+		grantSubjectScopes(requester, subject.GrantedScopes)
+		p.grantDefaultAudience(requester)
 
 		response, err := p.oauth.NewAuthorizeResponse(ctx, requester, NewSession(subject))
 		if err != nil {
@@ -45,6 +50,17 @@ func (p *Provider) AuthorizeHandler(resolve SubjectResolver) http.Handler {
 		}
 		p.oauth.WriteAuthorizeResponse(ctx, w, requester, response)
 	})
+}
+
+func validCodeChallenge(challenge string, method string) bool {
+	if method != "S256" {
+		return false
+	}
+	if len(challenge) != 43 {
+		return false
+	}
+	_, err := base64.RawURLEncoding.DecodeString(challenge)
+	return err == nil
 }
 
 // TokenHandler returns the OAuth token endpoint.
@@ -61,9 +77,7 @@ func (p *Provider) TokenHandler() http.Handler {
 			p.oauth.WriteAccessError(ctx, w, requester, err)
 			return
 		}
-		for _, scope := range requester.GetRequestedScopes() {
-			requester.GrantScope(scope)
-		}
+		p.grantDefaultAudience(requester)
 
 		response, err := p.oauth.NewAccessResponse(ctx, requester)
 		if err != nil {
@@ -104,8 +118,30 @@ func (p *Provider) RegisterRoutes(mux *http.ServeMux, prefix string, resolve Sub
 	mux.Handle(prefix+"/register", p.RegisterHandler())
 }
 
-func logHandlerError(message string, err error) {
-	if err != nil {
-		slog.Error(message, "error", err)
+func (p *Provider) grantDefaultAudience(requester interface {
+	GetRequestedAudience() fosite.Arguments
+	SetRequestedAudience(fosite.Arguments)
+	GrantAudience(string)
+}) {
+	if len(requester.GetRequestedAudience()) == 0 && p.audience != "" {
+		requester.SetRequestedAudience(fosite.Arguments{p.audience})
+	}
+	for _, audience := range requester.GetRequestedAudience() {
+		requester.GrantAudience(audience)
+	}
+}
+
+func grantSubjectScopes(requester interface {
+	GetRequestedScopes() fosite.Arguments
+	GrantScope(string)
+}, granted []string) {
+	allowed := map[string]struct{}{}
+	for _, scope := range granted {
+		allowed[scope] = struct{}{}
+	}
+	for _, scope := range requester.GetRequestedScopes() {
+		if _, ok := allowed[scope]; ok {
+			requester.GrantScope(scope)
+		}
 	}
 }

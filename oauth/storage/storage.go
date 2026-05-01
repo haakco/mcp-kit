@@ -40,7 +40,6 @@ var ErrNotFound = errors.New("oauth storage: not found")
 type Client struct {
 	ID               string
 	Name             string
-	SecretHash       string
 	RedirectURIs     []string
 	GrantTypes       []string
 	ResponseTypes    []string
@@ -335,10 +334,7 @@ type clientWrapper struct {
 
 func (c clientWrapper) GetID() string { return c.client.ID }
 func (c clientWrapper) GetHashedSecret() []byte {
-	if c.client.ClientSecretHash != "" {
-		return []byte(c.client.ClientSecretHash)
-	}
-	return []byte(c.client.SecretHash)
+	return []byte(c.client.ClientSecretHash)
 }
 func (c clientWrapper) GetRedirectURIs() []string {
 	return append([]string{}, c.client.RedirectURIs...)
@@ -374,7 +370,7 @@ func marshalRequestData(requester fosite.Requester) (map[string]any, error) {
 		GrantedAudience:   append([]string{}, requester.GetGrantedAudience()...),
 		Form:              map[string][]string{},
 	}
-	for key, values := range requester.GetRequestForm() {
+	for key, values := range sanitizeRequestForm(requester.GetRequestForm()) {
 		stored.Form[key] = append([]string{}, values...)
 	}
 	if requester.GetSession() != nil {
@@ -427,6 +423,24 @@ func cloneValues(values map[string][]string) url.Values {
 		cloned[key] = append([]string{}, value...)
 	}
 	return cloned
+}
+
+func sanitizeRequestForm(values url.Values) url.Values {
+	sensitive := map[string]struct{}{
+		"client_secret": {},
+		"code_verifier": {},
+		"password":      {},
+		"refresh_token": {},
+		"token":         {},
+	}
+	clean := url.Values{}
+	for key, value := range values {
+		if _, ok := sensitive[key]; ok {
+			continue
+		}
+		clean[key] = append([]string{}, value...)
+	}
+	return clean
 }
 
 // ScopesFromString converts a space-separated scope string to a slice.

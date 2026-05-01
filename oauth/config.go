@@ -3,6 +3,7 @@ package oauth
 import (
 	"crypto/rand"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/haakco/mcp-kit/oauth/keys"
@@ -11,9 +12,10 @@ import (
 
 // Config holds settings for the OAuth/OIDC provider.
 type Config struct {
-	Secret []byte //nolint:gosec // OAuth HMAC secret supplied by the consumer.
-	Issuer string
-	Store  storage.Store
+	Secret   []byte //nolint:gosec // OAuth HMAC secret supplied by the consumer.
+	Issuer   string
+	Audience string
+	Store    storage.Store
 
 	KeyManager *keys.Manager
 
@@ -46,6 +48,12 @@ func (c *Config) applyDefaults() error {
 	}
 	if len(c.Secret) != 32 {
 		return fmt.Errorf("oauth secret must be exactly 32 bytes, got %d", len(c.Secret))
+	}
+	if c.Issuer == "" {
+		return fmt.Errorf("oauth issuer is required")
+	}
+	if c.Audience == "" {
+		c.Audience = strings.TrimRight(c.Issuer, "/") + "/mcp"
 	}
 	if c.Store == nil {
 		return fmt.Errorf("oauth store is required")

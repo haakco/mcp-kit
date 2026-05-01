@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -130,11 +131,33 @@ func TestRegisterPublicClient(t *testing.T) {
 	if response.Code != http.StatusCreated {
 		t.Fatalf("status = %d, want 201; body=%s", response.Code, response.Body.String())
 	}
-	if !strings.Contains(response.Body.String(), `"client_id"`) {
-		t.Fatalf("response missing client_id: %s", response.Body.String())
+	var payload map[string]any
+	if err := json.NewDecoder(response.Body).Decode(&payload); err != nil {
+		t.Fatalf("decode registration response: %v", err)
 	}
-	if strings.Contains(response.Body.String(), "client_secret") {
-		t.Fatalf("public client response includes secret: %s", response.Body.String())
+	clientID, _ := payload["client_id"].(string)
+	if clientID == "" {
+		t.Fatalf("response missing client_id: %#v", payload)
+	}
+	if _, ok := payload["client_secret"]; ok {
+		t.Fatalf("public client response includes secret: %#v", payload)
+	}
+	if got := payload["token_endpoint_auth_method"]; got != "none" {
+		t.Fatalf("auth method = %#v, want none", got)
+	}
+	if got := payload["scope"]; got != "openid mcp.read" {
+		t.Fatalf("scope = %#v, want openid mcp.read", got)
+	}
+
+	client, err := store.GetClient(t.Context(), clientID)
+	if err != nil {
+		t.Fatalf("GetClient() error = %v", err)
+	}
+	if !client.IsPublic {
+		t.Fatal("stored client IsPublic = false, want true")
+	}
+	if len(client.Audience) != 1 || client.Audience[0] != "https://mcp.example.test/mcp" {
+		t.Fatalf("stored audience = %#v, want issuer /mcp", client.Audience)
 	}
 }
 
@@ -184,6 +207,31 @@ func TestAuthorizeRejectsBadState(t *testing.T) {
 	}
 }
 
+func TestAuthorizeRejectsBadPKCE(t *testing.T) {
+	store := storage.NewMemoryStore()
+	provider := newTestProvider(t, store)
+	savePKCEClient(t, store)
+	server := newOAuthTestServer(provider)
+	defer server.Close()
+
+	response, err := noRedirectClient().Get(server.URL + "/oauth/authorize?" + url.Values{
+		"client_id":             {"pkce-client"},
+		"redirect_uri":          {"http://127.0.0.1/callback"},
+		"response_type":         {"code"},
+		"scope":                 {"openid mcp.read"},
+		"state":                 {"state-123456"},
+		"code_challenge":        {"not-valid-base64url!!!!"},
+		"code_challenge_method": {"S256"},
+	}.Encode())
+	if err != nil {
+		t.Fatalf("GET authorize: %v", err)
+	}
+	defer response.Body.Close()
+	if response.StatusCode == http.StatusSeeOther {
+		t.Fatal("authorize accepted invalid code_challenge, want rejection")
+	}
+}
+
 func TestTokenRejectsBadPKCE(t *testing.T) {
 	store := storage.NewMemoryStore()
 	provider := newTestProvider(t, store)
@@ -196,6 +244,54 @@ func TestTokenRejectsBadPKCE(t *testing.T) {
 	defer response.Body.Close()
 	if response.StatusCode == http.StatusOK {
 		t.Fatal("token exchange accepted wrong PKCE verifier")
+	}
+}
+
+func TestRefreshTokenRotation(t *testing.T) {
+	store := storage.NewMemoryStore()
+	provider := newTestProvider(t, store)
+	savePKCEClient(t, store)
+	server := newOAuthTestServer(provider)
+	defer server.Close()
+
+	code := authorizeCode(t, server, "test-code-verifier-1234567890-must-be-at-least-43-characters-long", "state-123456")
+	tokenResponse := exchangeCode(t, server, code, "test-code-verifier-1234567890-must-be-at-least-43-characters-long")
+	refreshToken := decodeTokenField(t, tokenResponse, "refresh_token")
+
+	rotated := refreshTokenRequest(t, server.URL, refreshToken)
+	defer rotated.Body.Close()
+	if rotated.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(rotated.Body)
+		t.Fatalf("refresh status = %d, want 200; body=%s", rotated.StatusCode, string(body))
+	}
+
+	reused := refreshTokenRequest(t, server.URL, refreshToken)
+	defer reused.Body.Close()
+	if reused.StatusCode == http.StatusOK {
+		t.Fatal("refresh token reuse succeeded, want rotation to invalidate old token")
+	}
+}
+
+func TestTokenInvalidGrantEnvelopeOnPKCEFailure(t *testing.T) {
+	store := storage.NewMemoryStore()
+	provider := newTestProvider(t, store)
+	savePKCEClient(t, store)
+	server := newOAuthTestServer(provider)
+	defer server.Close()
+
+	code := authorizeCode(t, server, "test-code-verifier-1234567890-must-be-at-least-43-characters-long", "state-123456")
+	response := exchangeCode(t, server, code, "wrong-code-verifier-1234567890-must-be-at-least-43-characters-long")
+	defer response.Body.Close()
+
+	var payload map[string]any
+	if err := json.NewDecoder(response.Body).Decode(&payload); err != nil {
+		t.Fatalf("decode token error response: %v", err)
+	}
+	if payload["error"] != "invalid_grant" {
+		t.Fatalf("error = %#v, want invalid_grant; payload=%#v", payload["error"], payload)
+	}
+	if _, ok := payload["error_description"].(string); !ok {
+		t.Fatalf("payload missing error_description: %#v", payload)
 	}
 }
 
@@ -251,6 +347,7 @@ func savePKCEClient(t *testing.T, store *storage.MemoryStore) {
 		GrantTypes:    []string{"authorization_code", "refresh_token"},
 		ResponseTypes: []string{"code"},
 		Scopes:        []string{"openid", "mcp.read"},
+		Audience:      []string{"https://mcp.example.test/mcp"},
 		IsPublic:      true,
 	}); err != nil {
 		t.Fatalf("SaveClient() error = %v", err)
@@ -260,7 +357,7 @@ func savePKCEClient(t *testing.T, store *storage.MemoryStore) {
 func newOAuthTestServer(provider *oauth.Provider) *httptest.Server {
 	mux := http.NewServeMux()
 	provider.RegisterRoutes(mux, "/oauth", func(*http.Request) (oauth.Subject, error) {
-		return oauth.Subject{ID: "user-123", Email: "user@example.test"}, nil
+		return oauth.Subject{ID: "user-123", Email: "user@example.test", GrantedScopes: []string{"openid", "mcp.read"}}, nil
 	})
 	return httptest.NewServer(mux)
 }
@@ -317,6 +414,38 @@ func exchangeCode(t *testing.T, server *httptest.Server, code string, verifier s
 		t.Fatalf("POST token: %v", err)
 	}
 	return response
+}
+
+func refreshTokenRequest(t *testing.T, serverURL string, refreshToken string) *http.Response {
+	t.Helper()
+
+	response, err := http.PostForm(serverURL+"/oauth/token", url.Values{
+		"grant_type":    {"refresh_token"},
+		"client_id":     {"pkce-client"},
+		"refresh_token": {refreshToken},
+	})
+	if err != nil {
+		t.Fatalf("POST refresh token: %v", err)
+	}
+	return response
+}
+
+func decodeTokenField(t *testing.T, response *http.Response, field string) string {
+	t.Helper()
+	defer response.Body.Close()
+	if response.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(response.Body)
+		t.Fatalf("token status = %d, want 200; body=%s", response.StatusCode, string(body))
+	}
+	var payload map[string]any
+	if err := json.NewDecoder(response.Body).Decode(&payload); err != nil {
+		t.Fatalf("decode token response: %v", err)
+	}
+	value, _ := payload[field].(string)
+	if value == "" {
+		t.Fatalf("token response missing %s: %#v", field, payload)
+	}
+	return value
 }
 
 func noRedirectClient() *http.Client {
