@@ -41,10 +41,22 @@ type SigningKey struct {
 // replacement key is created as one storage operation.
 type Store interface {
 	FindActiveSigningKey(ctx context.Context) (SigningKey, error)
-	CreateSigningKey(ctx context.Context, key SigningKey) (SigningKey, error)
+	EnsureSigningKey(ctx context.Context, key SigningKey) (SigningKey, error)
 	RotateSigningKey(ctx context.Context, replacement SigningKey, retiredAt time.Time) (SigningKey, error)
 	ListVerifyingSigningKeys(ctx context.Context, now time.Time) ([]SigningKey, error)
 	DeleteExpiredSigningKeys(ctx context.Context, now time.Time) (int, error)
+}
+
+// ManagerOption configures a Manager.
+type ManagerOption func(*Manager)
+
+// WithClock injects a clock for tests and deterministic rotation.
+func WithClock(now func() time.Time) ManagerOption {
+	return func(manager *Manager) {
+		if now != nil {
+			manager.now = now
+		}
+	}
 }
 
 // Manager handles OAuth signing key lifecycle.
@@ -54,28 +66,24 @@ type Manager struct {
 }
 
 // NewManager creates a Manager backed by store.
-func NewManager(store Store) *Manager {
-	return &Manager{store: store, now: time.Now}
+func NewManager(store Store, opts ...ManagerOption) *Manager {
+	manager := &Manager{store: store, now: time.Now}
+	for _, opt := range opts {
+		opt(manager)
+	}
+	return manager
 }
 
 // EnsureSigningKey generates and persists a signing key if none exists.
 func (m *Manager) EnsureSigningKey(ctx context.Context) (SigningKey, error) {
-	existing, err := m.store.FindActiveSigningKey(ctx)
-	if err == nil {
-		return existing, nil
-	}
-	if !errors.Is(err, ErrNotFound) {
-		return SigningKey{}, fmt.Errorf("query active signing key: %w", err)
-	}
-
-	key, err := generateSigningKey()
+	key, err := generateSigningKey(m.now)
 	if err != nil {
 		return SigningKey{}, err
 	}
 
-	created, err := m.store.CreateSigningKey(ctx, key)
+	created, err := m.store.EnsureSigningKey(ctx, key)
 	if err != nil {
-		return SigningKey{}, fmt.Errorf("persist signing key: %w", err)
+		return SigningKey{}, fmt.Errorf("ensure signing key: %w", err)
 	}
 	return created, nil
 }
@@ -121,12 +129,16 @@ func (m *Manager) JWKS(ctx context.Context) (*jose.JSONWebKeySet, error) {
 
 // RotateSigningKey creates a new active key and retires the prior active key.
 func (m *Manager) RotateSigningKey(ctx context.Context, grace time.Duration) (SigningKey, error) {
-	key, err := generateSigningKey()
+	return m.rotateSigningKeyAt(ctx, grace, m.now)
+}
+
+func (m *Manager) rotateSigningKeyAt(ctx context.Context, grace time.Duration, now func() time.Time) (SigningKey, error) {
+	key, err := generateSigningKey(now)
 	if err != nil {
 		return SigningKey{}, err
 	}
 
-	created, err := m.store.RotateSigningKey(ctx, key, m.now().Add(grace))
+	created, err := m.store.RotateSigningKey(ctx, key, now().Add(grace))
 	if err != nil {
 		return SigningKey{}, fmt.Errorf("rotate signing key: %w", err)
 	}
@@ -142,7 +154,7 @@ func (m *Manager) RetireExpiredKeys(ctx context.Context) (int, error) {
 	return deleted, nil
 }
 
-func generateSigningKey() (SigningKey, error) {
+func generateSigningKey(now func() time.Time) (SigningKey, error) {
 	privateKey, err := rsa.GenerateKey(rand.Reader, 2048)
 	if err != nil {
 		return SigningKey{}, fmt.Errorf("generate RSA key: %w", err)
@@ -168,7 +180,7 @@ func generateSigningKey() (SigningKey, error) {
 		PrivateKeyPEM: string(privatePEM),
 		PublicKeyPEM:  string(publicPEM),
 		IsActive:      true,
-		CreatedAt:     time.Now(),
+		CreatedAt:     now(),
 	}, nil
 }
 

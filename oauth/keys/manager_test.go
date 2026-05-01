@@ -162,10 +162,15 @@ func (s *memoryStore) FindActiveSigningKey(context.Context) (keys.SigningKey, er
 	return keys.SigningKey{}, keys.ErrNotFound
 }
 
-func (s *memoryStore) CreateSigningKey(_ context.Context, key keys.SigningKey) (keys.SigningKey, error) {
+func (s *memoryStore) EnsureSigningKey(_ context.Context, key keys.SigningKey) (keys.SigningKey, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
+	for _, existing := range s.keys {
+		if existing.IsActive {
+			return existing, nil
+		}
+	}
 	if key.CreatedAt.IsZero() {
 		key.CreatedAt = time.Now()
 	}

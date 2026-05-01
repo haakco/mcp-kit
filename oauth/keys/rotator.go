@@ -128,7 +128,7 @@ func (r *Rotator) rotateAndCleanup(ctx context.Context) {
 		return
 	}
 
-	created, err := r.manager.RotateSigningKey(ctx, r.cfg.Grace)
+	created, err := r.manager.rotateSigningKeyAt(ctx, r.cfg.Grace, r.cfg.Now)
 	switch {
 	case err == nil:
 		r.logger.Info("rotated signing key", "kid", created.KID, "grace", r.cfg.Grace)

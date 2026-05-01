@@ -40,17 +40,41 @@ curl -i -X POST "$MCP_BASE_URL/mcp" \
 
 Expected: HTTP `401` with a bearer challenge when auth is enabled.
 
-### PR-02 - Dynamic client registration round trip
+### PR-02 - Authenticated handshake to tools/list
 
-Purpose: verify compatibility with clients that register OAuth clients dynamically.
+Purpose: prove protocol, auth, and registry are all working together.
+
+Setup: a valid bearer token from the OAuth token endpoint.
 
 ```bash
-curl -fsS -X POST "$MCP_BASE_URL/mcp-oauth/register" \
+curl -fsSi -X POST "$MCP_BASE_URL/mcp" \
+  -H "Origin: $MCP_ORIGIN" \
   -H 'Content-Type: application/json' \
-  -d '{"client_name":"manual-test","redirect_uris":["http://localhost:9999/cb"],"grant_types":["authorization_code","refresh_token"],"response_types":["code"],"token_endpoint_auth_method":"none"}' | jq .
+  -H 'Accept: application/json, text/event-stream' \
+  -H "Authorization: Bearer $TOKEN" \
+  -d '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-03-26","capabilities":{},"clientInfo":{"name":"manual-test","version":"0"}}}' \
+  > /tmp/mcp-init.txt
+
+SESSION=$(grep -i '^mcp-session-id:' /tmp/mcp-init.txt | awk '{print $2}' | tr -d '\r')
+
+curl -fsS -X POST "$MCP_BASE_URL/mcp" \
+  -H "Origin: $MCP_ORIGIN" \
+  -H 'Content-Type: application/json' \
+  -H 'Accept: application/json, text/event-stream' \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Mcp-Session-Id: $SESSION" \
+  -d '{"jsonrpc":"2.0","method":"notifications/initialized"}'
+
+curl -fsS -X POST "$MCP_BASE_URL/mcp" \
+  -H "Origin: $MCP_ORIGIN" \
+  -H 'Content-Type: application/json' \
+  -H 'Accept: application/json, text/event-stream' \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Mcp-Session-Id: $SESSION" \
+  -d '{"jsonrpc":"2.0","id":2,"method":"tools/list"}'
 ```
 
-Expected: JSON with `client_id` and `client_id_issued_at`; no client secret for public PKCE clients.
+Expected: `tools/list` returns the consumer's documented tool inventory.
 
 ### PR-03 - Origin allowlist enforcement
 
@@ -62,6 +86,18 @@ Expected:
 
 - Allowed origin returns a protocol response.
 - Disallowed origin returns `403`.
+
+### PR-04 - Dynamic client registration round trip
+
+Purpose: verify compatibility with clients that register OAuth clients dynamically.
+
+```bash
+curl -fsS -X POST "$MCP_BASE_URL/mcp-oauth/register" \
+  -H 'Content-Type: application/json' \
+  -d '{"client_name":"manual-test","redirect_uris":["http://localhost:9999/cb"],"grant_types":["authorization_code","refresh_token"],"response_types":["code"],"token_endpoint_auth_method":"none"}' | jq .
+```
+
+Expected: JSON with `client_id` and `client_id_issued_at`; no client secret for public PKCE clients.
 
 ## OAuth Gotchas
 
@@ -137,3 +173,29 @@ If live behavior contradicts tests or standalone probes, rebuild the server and 
 ### TG-01 - Curl probes should include the same headers as real clients
 
 For transport probes, include `Origin`, `Content-Type`, `Accept`, `Authorization`, and `Mcp-Session-Id` where applicable. Missing headers can test a different path than a real client uses.
+
+## Engineering Gaps
+
+### EG-01 - Checklist coverage should be testable
+
+Every registered tool, resource, and prompt should have a corresponding checklist row in the active MCP cycle docs. Add a coverage test that fails when a registered surface has no documented probe.
+
+### EG-02 - CI needs a live HTTP smoke
+
+Unit tests can pass while real Streamable HTTP behavior fails. CI should include a small live smoke that boots the server, mints or injects a test token, calls `tools/list`, and asserts the protocol shape.
+
+### EG-03 - Inspector smoke should be automated
+
+Manual Inspector checks are easy to defer. Add a fixture-backed Inspector run or equivalent schema-render smoke so schema warnings are caught before release.
+
+### EG-04 - Server instructions must reference real surfaces
+
+If server instructions name tools, resources, or prompts, test that each named surface exists in the registered set. Stale instructions are a client-facing bug.
+
+### EG-05 - Scope mapping should live in code
+
+Each surface's required scopes should be declared in a registry that tests can inspect. For each protected surface, verify a token missing the required scope receives `insufficient_scope`.
+
+### EG-06 - Every tool needs dispatch coverage
+
+Each tool should have at least one dispatch-level test that proves request decoding, handler execution, and response encoding work together.
