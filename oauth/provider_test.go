@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -158,6 +159,32 @@ func TestRegisterPublicClient(t *testing.T) {
 	}
 	if len(client.Audience) != 1 || client.Audience[0] != "https://mcp.example.test/mcp" {
 		t.Fatalf("stored audience = %#v, want issuer /mcp", client.Audience)
+	}
+}
+
+func TestRegisterRejectsUnsafeRedirectSchemes(t *testing.T) {
+	store := storage.NewMemoryStore()
+	provider := newTestProvider(t, store)
+
+	for _, redirectURI := range []string{"javascript:alert(1)", "data:text/html,hi", "file:///tmp/callback", "http://example.com/callback"} {
+		t.Run(redirectURI, func(t *testing.T) {
+			request := httptest.NewRequest(http.MethodPost, "/oauth/register", strings.NewReader(`{
+				"client_name":"Unsafe",
+				"redirect_uris":[`+strconv.Quote(redirectURI)+`],
+				"grant_types":["authorization_code"],
+				"response_types":["code"],
+				"token_endpoint_auth_method":"none",
+				"scope":"openid mcp.read"
+			}`))
+			request.Header.Set("Content-Type", "application/json")
+			response := httptest.NewRecorder()
+
+			provider.RegisterHandler().ServeHTTP(response, request)
+
+			if response.Code != http.StatusBadRequest {
+				t.Fatalf("status = %d, want 400; body=%s", response.Code, response.Body.String())
+			}
+		})
 	}
 }
 

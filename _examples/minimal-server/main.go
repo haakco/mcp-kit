@@ -6,32 +6,43 @@ import (
 	"errors"
 	"log"
 	"net/http"
+	"os"
 	"strings"
 
 	"github.com/haakco/mcp-kit/mcpkit"
 	"github.com/haakco/mcp-kit/oauth"
+	"github.com/haakco/mcp-kit/oauth/keys"
+	"github.com/haakco/mcp-kit/oauth/storage"
 	"github.com/haakco/mcp-kit/oidc"
 )
 
-const issuer = "http://localhost:8080"
+const defaultIssuer = "http://localhost:8080"
 
 func main() {
 	handler, err := newHandler()
 	if err != nil {
 		log.Fatal(err)
 	}
-	log.Println("listening on :8080")
-	log.Fatal(http.ListenAndServe(":8080", handler))
+	addr := listenAddr()
+	log.Println("listening on " + addr)
+	log.Fatal(http.ListenAndServe(addr, handler))
 }
 
 func newHandler() (http.Handler, error) {
+	oauthProvider, keyManager, err := newExampleOAuth()
+	if err != nil {
+		return nil, err
+	}
+
 	mcpServer, err := mcpkit.New(mcpkit.Config{
 		Handler:        http.HandlerFunc(handleMCP),
 		AllowedOrigins: []string{"http://localhost:8080"},
 		AllowLoopback:  true,
 		Bearer: mcpkit.BearerConfig{
+			Introspector:        oauthProvider.OAuth2Provider(),
 			TokenValidator:      staticTokenValidator{},
-			ResourceMetadataURL: issuer + "/.well-known/oauth-protected-resource",
+			ResourceMetadataURL: issuerURL() + "/.well-known/oauth-protected-resource",
+			ExpectedAudience:    issuerURL() + "/mcp",
 		},
 	})
 	if err != nil {
@@ -39,10 +50,54 @@ func newHandler() (http.Handler, error) {
 	}
 
 	mux := http.NewServeMux()
-	discovery := oidc.NewDiscoveryConfig(issuer, []string{"mcp.read"})
-	discovery.RegisterRoutes(mux, oidc.RouteConfig{ResourceURL: issuer + "/mcp"})
+	discovery := oidc.NewDiscoveryConfig(issuerURL(), []string{"mcp.read"})
+	discovery.RegisterRoutes(mux, oidc.RouteConfig{
+		ResourceURL: issuerURL() + "/mcp",
+		JWKS:        oidc.JWKSHandler(keyManager),
+	})
+	// Demo only: production servers must authenticate the browser session and
+	// collect consent before granting requested scopes.
+	oauthProvider.RegisterRoutes(mux, "/oauth", func(*http.Request) (oauth.Subject, error) {
+		return oauth.Subject{
+			ID:            "example-user",
+			Email:         "example@example.com",
+			GrantedScopes: []string{"openid", "mcp.read", "skills.read", "skills.write"},
+		}, nil
+	})
 	mux.Handle("/mcp", mcpServer.Handler())
 	return mux, nil
+}
+
+func newExampleOAuth() (*oauth.Provider, *keys.Manager, error) {
+	keyManager := keys.NewManager(keys.NewMemoryStore())
+	if _, err := keyManager.EnsureSigningKey(context.Background()); err != nil {
+		return nil, nil, err
+	}
+	provider, err := oauth.New(oauth.Config{
+		Issuer:        issuerURL(),
+		Audience:      issuerURL() + "/mcp",
+		Store:         storage.NewMemoryStore(),
+		KeyManager:    keyManager,
+		AllowedScopes: []string{"openid", "mcp.read", "skills.read", "skills.write"},
+	})
+	if err != nil {
+		return nil, nil, err
+	}
+	return provider, keyManager, nil
+}
+
+func issuerURL() string {
+	if value := strings.TrimRight(os.Getenv("MCP_KIT_EXAMPLE_ISSUER"), "/"); value != "" {
+		return value
+	}
+	return defaultIssuer
+}
+
+func listenAddr() string {
+	if value := os.Getenv("MCP_KIT_EXAMPLE_ADDR"); value != "" {
+		return value
+	}
+	return ":8080"
 }
 
 func handleMCP(w http.ResponseWriter, r *http.Request) {
@@ -83,6 +138,8 @@ func writeJSON(w http.ResponseWriter, value any) {
 
 type staticTokenValidator struct{}
 
+// ValidateAndResolve is demo-only PAT validation for the example server.
+// Production servers should validate stored token hashes and authorization.
 func (staticTokenValidator) ValidateAndResolve(_ context.Context, rawToken string) (*oauth.PATAuthResult, error) {
 	if !strings.EqualFold(rawToken, "example-token") {
 		return nil, errors.New("invalid token")

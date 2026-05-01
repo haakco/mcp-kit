@@ -13,7 +13,7 @@ A reusable Go library for building production-grade Model Context Protocol (MCP)
 - **JSON-RPC envelope rewriter** so SDK protocol errors come out as canonical JSON-RPC envelopes (not plain-text 400s)
 - **Origin allowlist** with explicit loopback fallback for browser MCP clients
 - **OIDC / OAuth discovery endpoints** (`/.well-known/openid-configuration`, `/.well-known/oauth-authorization-server`, `/.well-known/oauth-protected-resource`, `/.well-known/jwks.json`)
-- **CLI auth helper** (`mcpkit/cliauth`) with browser-based PKCE flow and OS credential storage
+- **CLI auth helper** (`mcpkit/cliauth`) with browser-based PKCE flow and issuer-scoped 0600 file-backed token cache
 - **Ent schema mixins** for OAuth tables (`oauth_client`, `oauth_signing_key`, `oauth_authorization_code`, `oauth_access_token`, `oauth_refresh_token`, `personal_access_token`)
 - **E2E test methodology** templates with phased dispatch runbook, evidence captures, and lessons-learned IDs
 

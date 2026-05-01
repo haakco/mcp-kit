@@ -247,7 +247,7 @@ func validateRedirectURI(raw string) error {
 		return nil
 	}
 	if parsed.Scheme != "http" && parsed.Scheme != "https" {
-		return nil
+		return fmt.Errorf("redirect_uri %q: scheme %q is not supported", raw, parsed.Scheme)
 	}
 	return fmt.Errorf("redirect_uri %q: http is only allowed for loopback hosts", raw)
 }
