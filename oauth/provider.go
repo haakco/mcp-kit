@@ -19,6 +19,7 @@ type Provider struct {
 	issuer        string
 	audience      string
 	allowedScopes []string
+	defaultScopes []string
 	allowedScope  map[string]struct{}
 }
 
@@ -71,6 +72,7 @@ func New(cfg Config) (*Provider, error) {
 		issuer:        cfg.Issuer,
 		audience:      cfg.Audience,
 		allowedScopes: append([]string{}, cfg.AllowedScopes...),
+		defaultScopes: append([]string{}, cfg.DefaultScopes...),
 		allowedScope:  scopeSet(cfg.AllowedScopes),
 	}, nil
 }
@@ -85,6 +87,7 @@ func (p *Provider) RegisterHandler() http.Handler {
 	return NewRegistrationHandler(RegistrationConfig{
 		Store:         p.store,
 		AllowedScopes: p.allowedScopes,
+		DefaultScopes: p.defaultScopes,
 		Audience:      p.audience,
 	})
 }

@@ -2,7 +2,8 @@
 
 **Last verified:** 2026-05-02
 **Consumer repo:** `/Volumes/Dev/HaakCo/AiProjects/vorrent`
-**Vorrent commit:** `1d6b870d refactor: adopt shared mcp kit`
+**Vorrent migration commit:** `1d6b870d refactor: adopt shared mcp kit`
+**Vorrent closeout commits:** `224c52c6 test: close mcp media blocker coverage`; `3c2596d3 fix: include offline subtitle sidecars`; `f51e78be docs: update offline subtitle package status`
 **Kit version consumed:** `github.com/haakco/mcp-kit v0.3.1-0.20260501225920-376d0b3bc2da`
 
 ## What Changed
@@ -27,6 +28,8 @@ Vorrent did not need a separate `internal/kitwiring` package for this pass. It a
 - `strictMCPAudienceIntrospector` in `internal/api/http_server.go` preserves Vorrent's exact `<baseURL>/mcp` audience requirement.
 - `vorrentMCPClientRegistrar` in `internal/api/mcp_oauth_register.go` persists kit-generated dynamic clients into Vorrent's existing Ent OAuth client table.
 - `internal/mcpserver/auth.go` reads scopes from `github.com/haakco/mcp-kit/oauth`.
+
+The app-specific OAuth route files remain active as thin glue. They are not legacy fallback paths; they mount kit handlers and adapt Vorrent's existing persistence/audit model.
 
 ## Kit Changes Required By Vorrent
 
@@ -65,13 +68,16 @@ Vorrent verification that passed during the migration:
 - Safe tool calls, resource reads, prompt reads, error envelopes, and read-only token write denial.
 - MCP Inspector CLI rendered all 14 tool schemas.
 - Codex `mcp login vorrent-mcp` completed through browser OAuth approval driven by Playwright MCP.
+- Claude Code real-client gate passed against `vorrent-mcp`.
+- Full destructive/fixture-heavy final blocker passed against the rebuilt kit-backed Vorrent binary on 2026-05-02:
+  - disposable Big Buck Bunny download deleted with `delete_files=true`;
+  - fixture-backed `start_transcode_job` completed and produced a probed MP4 output;
+  - disposable `cancel_transcode_job` returned canceled status.
+- Security follow-up: Vorrent now rejects MCP transcode input/output paths outside app-owned media storage before queueing; a live rerun rejected an outside `/tmp` input and completed an allowed disposable fixture under the resolved Vorrent media/download root.
 
 ## Remaining Before Tagging v0.4.0
 
-Do not tag `v0.4.0` until these are closed:
-
-- Full Vorrent MCP cycle P0-P10, including destructive/fixture-heavy rows, against the kit-backed binary.
-- Claude Code real-client gate against `vorrent-mcp`.
+No Vorrent destructive/fixture-heavy migration blocker remains open. The final Vorrent closeout SHA is recorded above and in the master plan; `v0.4.0` may be tagged from the current kit state after the usual release checks.
 
 ## Gotchas
 

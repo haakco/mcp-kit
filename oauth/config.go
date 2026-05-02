@@ -20,6 +20,7 @@ type Config struct {
 	KeyManager *keys.Manager
 
 	AllowedScopes []string
+	DefaultScopes []string
 
 	AccessTokenLifespan   time.Duration
 	RefreshTokenLifespan  time.Duration

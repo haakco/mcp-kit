@@ -44,6 +44,7 @@ var (
 type RegistrationHandler struct {
 	store                          ClientRegistrar
 	allowedScopes                  []string
+	defaultScopes                  []string
 	allowedScope                   map[string]struct{}
 	audience                       string
 	defaultTokenEndpointAuthMethod string
@@ -61,6 +62,7 @@ type ClientRegistrar interface {
 type RegistrationConfig struct {
 	Store                          ClientRegistrar
 	AllowedScopes                  []string
+	DefaultScopes                  []string
 	Audience                       string
 	DefaultTokenEndpointAuthMethod string
 	DefaultGrantTypes              []string
@@ -77,6 +79,7 @@ func NewRegistrationHandler(cfg RegistrationConfig) http.Handler {
 	return &RegistrationHandler{
 		store:                          cfg.Store,
 		allowedScopes:                  append([]string{}, cfg.AllowedScopes...),
+		defaultScopes:                  append([]string{}, cfg.DefaultScopes...),
 		allowedScope:                   scopeSet(cfg.AllowedScopes),
 		audience:                       cfg.Audience,
 		defaultTokenEndpointAuthMethod: defaultAuthMethod,
@@ -140,7 +143,7 @@ func (h *RegistrationHandler) process(r *http.Request, req registrationRequest) 
 	if code != "" {
 		return nil, status, code, description
 	}
-	scopes, scopeString, err := normalizeScopesWithDefault(req.Scope, h.allowedScopes, h.allowedScope)
+	scopes, scopeString, err := normalizeScopesWithDefault(req.Scope, h.defaultScopes, h.allowedScopes, h.allowedScope)
 	if err != nil {
 		return nil, http.StatusBadRequest, "invalid_client_metadata", err.Error()
 	}
@@ -273,22 +276,29 @@ func normalizeScopes(scope string, allowed map[string]struct{}) ([]string, strin
 	return scopes, strings.Join(scopes, " "), nil
 }
 
-func normalizeScopesWithDefault(scope string, allowedScopes []string, allowed map[string]struct{}) ([]string, string, error) {
+func normalizeScopesWithDefault(scope string, defaultScopes []string, allowedScopes []string, allowed map[string]struct{}) ([]string, string, error) {
 	if strings.TrimSpace(scope) != "" {
 		return normalizeScopes(scope, allowed)
 	}
-	scopes := make([]string, 0, len(allowedScopes))
-	seen := make(map[string]struct{}, len(allowedScopes))
-	for _, allowedScope := range allowedScopes {
-		allowedScope = strings.TrimSpace(allowedScope)
-		if allowedScope == "" {
+
+	if len(defaultScopes) == 0 {
+		defaultScopes = allowedScopes
+	}
+	scopes := make([]string, 0, len(defaultScopes))
+	seen := make(map[string]struct{}, len(defaultScopes))
+	for _, defaultScope := range defaultScopes {
+		defaultScope = strings.TrimSpace(defaultScope)
+		if defaultScope == "" {
 			continue
 		}
-		if _, duplicate := seen[allowedScope]; duplicate {
+		if _, ok := allowed[defaultScope]; !ok {
+			return nil, "", fmt.Errorf("default scope %q is not allowed", defaultScope)
+		}
+		if _, duplicate := seen[defaultScope]; duplicate {
 			continue
 		}
-		seen[allowedScope] = struct{}{}
-		scopes = append(scopes, allowedScope)
+		seen[defaultScope] = struct{}{}
+		scopes = append(scopes, defaultScope)
 	}
 	return scopes, strings.Join(scopes, " "), nil
 }

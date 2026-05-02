@@ -163,7 +163,7 @@ func TestRegisterPublicClient(t *testing.T) {
 	}
 }
 
-func TestRegisterDefaultsOmittedScopeToAllowedScopes(t *testing.T) {
+func TestRegisterDefaultsOmittedScopeToProviderDefaultScopes(t *testing.T) {
 	store := storage.NewMemoryStore()
 	provider := newTestProvider(t, store)
 
@@ -186,8 +186,8 @@ func TestRegisterDefaultsOmittedScopeToAllowedScopes(t *testing.T) {
 	if err := json.NewDecoder(response.Body).Decode(&payload); err != nil {
 		t.Fatalf("decode registration response: %v", err)
 	}
-	if got := payload["scope"]; got != "openid mcp.read mcp.write offline_access" {
-		t.Fatalf("scope = %#v, want provider allowed scopes", got)
+	if got := payload["scope"]; got != "openid mcp.read offline_access" {
+		t.Fatalf("scope = %#v, want provider default scopes", got)
 	}
 
 	clientID, _ := payload["client_id"].(string)
@@ -195,8 +195,8 @@ func TestRegisterDefaultsOmittedScopeToAllowedScopes(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GetClient() error = %v", err)
 	}
-	if got := strings.Join(client.Scopes, " "); got != "openid mcp.read mcp.write offline_access" {
-		t.Fatalf("stored scopes = %q, want provider allowed scopes", got)
+	if got := strings.Join(client.Scopes, " "); got != "openid mcp.read offline_access" {
+		t.Fatalf("stored scopes = %q, want provider default scopes", got)
 	}
 }
 
@@ -205,6 +205,7 @@ func TestRegistrationHandlerCanDefaultPublicClientAuth(t *testing.T) {
 	handler := oauth.NewRegistrationHandler(oauth.RegistrationConfig{
 		Store:                          store,
 		AllowedScopes:                  []string{"mcp.read", "mcp.write", "offline_access"},
+		DefaultScopes:                  []string{"mcp.read", "mcp.write", "offline_access"},
 		Audience:                       "https://mcp.example.test/mcp",
 		DefaultTokenEndpointAuthMethod: "none",
 		DefaultGrantTypes:              []string{"authorization_code", "refresh_token"},
@@ -225,6 +226,9 @@ func TestRegistrationHandlerCanDefaultPublicClientAuth(t *testing.T) {
 	var payload map[string]any
 	if err := json.NewDecoder(response.Body).Decode(&payload); err != nil {
 		t.Fatalf("decode response: %v", err)
+	}
+	if got := payload["scope"]; got != "mcp.read mcp.write offline_access" {
+		t.Fatalf("scope = %#v, want default scopes", got)
 	}
 	clientID, _ := payload["client_id"].(string)
 	if !strings.HasPrefix(clientID, "mcp-") {
@@ -470,6 +474,7 @@ func newTestProvider(t *testing.T, store storage.Store) *oauth.Provider {
 		Store:         store,
 		KeyManager:    manager,
 		AllowedScopes: []string{"openid", "mcp.read", "mcp.write", "offline_access"},
+		DefaultScopes: []string{"openid", "mcp.read", "offline_access"},
 	})
 	if err != nil {
 		t.Fatalf("New() error = %v", err)

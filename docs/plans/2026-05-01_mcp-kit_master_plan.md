@@ -932,42 +932,35 @@ Run the cycle dispatch runbook (template from kit's `docs/dispatch-runbook-templ
 ### Phase 7: Migrate vorrent to kit (v0.4.0 gate)
 
 **Repo:** `/Volumes/Dev/HaakCo/AiProjects/vorrent/`
-**Status:** Kit-backed Vorrent migration committed and pushed as `1d6b870d refactor: adopt shared mcp kit` on 2026-05-02. `v0.4.0` is not tagged yet because the full destructive/fixture-heavy P0-P10 cycle and Claude Code real-client gate remain unproven in the migration pass.
+**Status:** Kit-backed Vorrent migration committed and pushed as `1d6b870d refactor: adopt shared mcp kit` on 2026-05-02. Final Vorrent closeout committed and pushed as `224c52c6 test: close mcp media blocker coverage`, `3c2596d3 fix: include offline subtitle sidecars`, and `f51e78be docs: update offline subtitle package status` on 2026-05-02. Claude Code real-client gate passed against `vorrent-mcp` on 2026-05-02. The destructive/fixture-heavy final blocker passed against the rebuilt kit-backed Vorrent binary on 2026-05-02 with disposable Big Buck Bunny deletion, fixture-backed transcode completion, disposable transcode cancellation, temp OAuth QA user/client cleanup, and MCP transcode path containment. `v0.4.0` is ready for the usual release checks.
 
-**Files (vorrent, modified or deleted):**
-- Delete: `internal/api/mcp_oauth.go`, `mcp_oauth_register.go`
-- Delete: `internal/oauth/` (entire package)
-- Delete: `internal/mcpserver/jsonrpc_envelope.go` (now in kit's `mcpmw/envelope.go`)
-- Delete: `internal/mcpserver/origin.go` (now in kit's `mcpmw/origin.go`)
-- Delete: `internal/mcpserver/dynamic_bearer_auth.go` (now in kit's `oauth/middleware.go`)
-- Create: `internal/kitwiring/userstore.go` — adapter from existing `internal/user.Service` to `userstore.Store`
-- Create: `internal/kitwiring/audit.go` — adapter from existing audit emitter
-- Create: `internal/kitwiring/authz.go` — adapter from existing permission service
-- Modify: `internal/mcpserver/server.go` — replace direct SDK construction with `mcpkit.New()`
-- Modify: `internal/api/http_server.go` — replace direct envelope/origin middleware with kit composition (already done by `mcpkit.New()`)
-- Modify: `cmd/<entry>/main.go` (or `main.go`) — wire kit
-- Modify: `ent/schema/` — replace inline OAuth schemas with kit mixins
-- Modify: `go.mod`
+**Final Vorrent file shape:**
+- Deleted local MCP middleware: `internal/mcpserver/jsonrpc_envelope.go`, `jsonrpc_envelope_test.go`, `origin.go`, `origin_test.go`.
+- Removed the old Vorrent dynamic-client read-only scope repair path because kit registration now persists provider defaults at creation time.
+- Kept thin app-owned OAuth glue in `internal/api/mcp_oauth.go` and `internal/api/mcp_oauth_register.go`; these mount kit handlers and adapt Vorrent's existing Ent persistence/audit boundary.
+- Did not create `internal/kitwiring/`; Vorrent's existing `internal/api` adapters are the integration boundary for this pass.
+- Modified `internal/api/http_server.go` to compose kit bearer/origin/envelope behavior through `mcpkit.New()`.
+- Modified `internal/mcpserver/auth.go` to read authenticated scopes from `github.com/haakco/mcp-kit/oauth`.
+- Modified `go.mod` / `go.sum` to consume GitHub `mcp-kit`.
 
 **Steps:**
 1. Add kit dep.
-2. Build `internal/kitwiring/` adapters (~3 files, small).
-3. Schema mixin migration (empty DDL diff required).
-4. Replace `internal/oauth/` with `oauth.New()`.
-5. Replace `internal/mcpserver/` core construction (`server.go`) with `mcpkit.New()`. Keep `tools.go`, `resources.go`, `prompts.go` — those are domain code.
-6. Delete the now-replaced files.
-7. Run cycle 2 (the deferred real-client gates from cycle 1) against kit-backed binary.
+2. Reuse Vorrent's existing `internal/api` adapter boundary instead of adding `internal/kitwiring/`.
+3. Keep Vorrent's existing OAuth persistence schema and mount kit OAuth handlers through thin route glue.
+4. Replace local MCP middleware with kit middleware through `mcpkit.New()`. Keep `tools.go`, `resources.go`, `prompts.go` — those are domain code.
+5. Delete the now-replaced local middleware files.
+6. Run cycle 2 (the deferred real-client gates from cycle 1) against kit-backed binary.
 
 **Verify:**
 - `go build ./...` clean.
 - `go test ./... -count=1` green (24 unit tests in internal/mcpserver).
-- Cycle 2 dispatch runbook P0–P10 green, including Inspector + Claude Code real-client gates.
+- Cycle 2 dispatch runbook closeout green for destructive/fixture-heavy MCP blockers, including Inspector + Claude Code real-client gates and MCP transcode path containment.
 - LOC delta: net deletion of ~1500 lines.
 - Kit gains: key rotation + PAT (vorrent didn't have these before).
 
-**Commit (in vorrent):** `1d6b870d refactor: adopt shared mcp kit`
+**Commits (in vorrent):** `1d6b870d refactor: adopt shared mcp kit`; `224c52c6 test: close mcp media blocker coverage`; `3c2596d3 fix: include offline subtitle sidecars`; `f51e78be docs: update offline subtitle package status`
 
-**Kit tag:** pending `v0.4.0` after the remaining live-client gates close.
+**Kit tag:** pending `v0.4.0` after the usual release checks.
 
 **Effort:** 3 days.
 
