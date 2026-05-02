@@ -219,6 +219,29 @@ Probe to add to your contract suite:
 
 If you ship a `ListVisibleX` method, also ship a `CountVisibleX` (and use it for pagination totals). Calling a vanilla `CountX` from a handler that returned visibility-filtered rows leaks the existence of private records via the `total` field, even if the rows themselves are filtered. Easy to miss because the list output looks correct.
 
+### AG-03 - "No scopes in context" must mean default-deny, not allow
+
+When auth is opt-in (issuer URL + public URL drive whether OAuth is configured), it's tempting to write `if scopes == nil { allow }` as the dev-mode shortcut in service-layer authz. **Don't.** That branch fires in two situations: (a) auth is genuinely off at startup; (b) auth IS configured but a code path reached the service without going through bearer middleware. Case (a) is fine; case (b) is a privilege-escalation channel that's invisible until it bites.
+
+Fix: add an explicit `WithAuthDisabled(ctx)` sentinel that bearer middleware sets only when `Introspector == nil && TokenValidator == nil`. Service-layer code reads that sentinel — never `scopes == nil` directly — so a forgotten middleware wrapper defaults to anonymous (only public records visible) instead of full passthrough.
+
+Surfaced in skills-mcp 2026-05-02: three sites in `service/skill_visibility.go` and `service/authz_scope.go::Authorize` were using `auth.GetScopes(ctx) == nil` as the dev-mode shortcut. Replacing with `auth.IsAuthDisabled(ctx)` closed the bypass for any caller that fails to set scopes (e.g. cookie-session API paths, internal callers, test fixtures). The pre-existing `RequireScope` middleware already used the right sentinel — service layer just hadn't matched it.
+
+Probe to add to your contract suite:
+
+- For every public read/write entry point on the service layer, exercise it with `context.Background()` (no scopes, no auth-disabled). The expected outcome is "anonymous" (UserID=0) — only public/global records visible — not "everything".
+- Then exercise it with `WithAuthDisabled(ctx)` to confirm the dev-mode passthrough still works.
+
+### AG-04 - Auth scopes belong on context, not in the actor struct
+
+When you need to make decisions like "is this caller authenticated at all?" or "what scopes does this token grant?", read them from `context.Context` via typed helpers (`auth.GetScopes(ctx)`, `auth.IsAuthDisabled(ctx)`) — not from a side-channel `Actor` parameter. Reasons:
+
+- The middleware that establishes auth state writes to context once; downstream callers read it without extra plumbing.
+- A handler that builds an Actor from a session can forget to populate scopes; an Actor-only model has no defense.
+- Tests can construct contexts with exactly the scope state under test (`context.WithValue(ctx, ContextKeyScopes, ...)`) and have them flow through unchanged.
+
+Surfaced in skills-mcp 2026-05-02: the visibility filter took both `ctx` and `actor` and was tempted to use `actor.UserID == 0` as the dev-mode signal. That conflated "anonymous user" with "auth not configured". Splitting them — auth state on context, identity on the actor — kept each concern in its own channel.
+
 ## Code-Quality Gotchas
 
 ### CG-01 - Silent errors need a *concrete* reason, not "best-effort"

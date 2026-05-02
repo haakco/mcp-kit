@@ -12,6 +12,8 @@ The module is pre-1.0. Breaking API changes are allowed between minor versions a
 - `docs/lessons.md` — added `AG-*` (authz gotchas) and `CG-*` (code-quality gotchas) sections:
   - `AG-01` — cross-surface admin gates must live in the service layer or every handler must enforce.
   - `AG-02` — list/count parity for visibility-filtered endpoints (or pagination totals leak existence).
+  - `AG-03` — "no scopes in context" must mean default-deny, not allow; use an explicit `WithAuthDisabled` sentinel.
+  - `AG-04` — auth scopes belong on context, not in the actor struct (separates auth state from identity).
   - `CG-01` — silent-error annotations need a concrete reason, not "best-effort".
   - `CG-02` — methods-per-receiver caps catch god-classes early; prefer composition when the cap fires.
   - `CG-03` — atomic commit etiquette for pre-existing test fixes during feature work.
