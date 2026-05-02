@@ -4,6 +4,20 @@ All notable changes to `mcp-kit` are documented here.
 
 The module is pre-1.0. Breaking API changes are allowed between minor versions and must include migration notes.
 
+## Unreleased
+
+### Added
+
+- `docs/recipes/admin-gate.md` — pattern doc for enforcing admin-only mutations consistently across HTTP API + MCP surfaces. Sourced from skills-mcp Phase 1.5 / Phase 1 validation findings (privilege-escalation bug in the MCP `update_skill` tool path).
+- `docs/lessons.md` — added `AG-*` (authz gotchas) and `CG-*` (code-quality gotchas) sections:
+  - `AG-01` — cross-surface admin gates must live in the service layer or every handler must enforce.
+  - `AG-02` — list/count parity for visibility-filtered endpoints (or pagination totals leak existence).
+  - `CG-01` — silent-error annotations need a concrete reason, not "best-effort".
+  - `CG-02` — methods-per-receiver caps catch god-classes early; prefer composition when the cap fires.
+  - `CG-03` — atomic commit etiquette for pre-existing test fixes during feature work.
+
+These are documentation-only changes. No code or interface surface affected.
+
 ## v0.1.0 - 2026-05-01
 
 Initial reusable MCP server kit surface.

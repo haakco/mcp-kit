@@ -14,6 +14,8 @@ This file collects reusable MCP implementation and QA lessons from HaakCo server
 | `JR` | JSON-RPC envelope traps |
 | `TQ` | Transport quirks |
 | `TG` | Tooling gotchas |
+| `AG` | Authz gotchas |
+| `CG` | Code-quality gotchas (project guardrails) |
 
 ## False Positives
 
@@ -199,3 +201,40 @@ Each surface's required scopes should be declared in a registry that tests can i
 ### EG-06 - Every tool needs dispatch coverage
 
 Each tool should have at least one dispatch-level test that proves request decoding, handler execution, and response encoding work together.
+
+## Authz Gotchas
+
+### AG-01 - Cross-surface admin gates need to live in the service layer, not the handler
+
+When a privileged mutation (e.g. changing a skill's visibility, archiving a workspace, rotating a signing key) is exposed via **both** the HTTP API (cookie/session auth) and the MCP tool path (bearer-token auth), the admin gate must be enforced at every surface — or, better, pushed into the service mutator so neither caller has to remember.
+
+Surfaced in skills-mcp 2026-05-02: `PUT /api/v1/skills/{id}` correctly required admin to flip `visibility`, but the matching `update_skill` MCP tool did not, so any bearer-authed caller could promote a workspace skill to public. The fix added an `AuthzService.IsAdmin(ctx, userID)` probe and gated both surfaces — but the systemic answer is to move the check into `service.UpdateSkill` so the rule cannot be missed when a future surface is added.
+
+Probe to add to your contract suite:
+
+- For each privileged field (visibility, role, scope, etc.), exercise the mutation via every public surface with a non-admin token. Each call must reject with a clear error.
+- Bonus: register the gated fields in a single registry and have a test iterate it; new fields auto-wire into the suite.
+
+### AG-02 - List/Count parity for visibility-filtered endpoints
+
+If you ship a `ListVisibleX` method, also ship a `CountVisibleX` (and use it for pagination totals). Calling a vanilla `CountX` from a handler that returned visibility-filtered rows leaks the existence of private records via the `total` field, even if the rows themselves are filtered. Easy to miss because the list output looks correct.
+
+## Code-Quality Gotchas
+
+### CG-01 - Silent errors need a *concrete* reason, not "best-effort"
+
+Every `_ = funcCall(...)` site in production code should have `// nolint:errcheck // <reason>` where the reason cites either a stdlib invariant ("hash.Hash.Write never returns an error"), a documented intent ("best-effort revoke during logout-all — caller already aborted"), or a structural justification ("response already partial; can't recover"). "Best-effort" alone is not enough — it tends to cover for genuine handling gaps.
+
+Lint rule: `errcheck` with a fail-loud CI gate. Pair with `revive` to flag bare `_ = ...` without an annotation comment within ±1 line.
+
+### CG-02 - Methods-per-receiver caps catch god-classes early
+
+Set a cap of ~12 methods per receiver and fail-loud in CI. The cap doesn't have to be perfect; what matters is the conversation it forces: when a 13th method wants to be added, the right move is usually a separate handler/embedder type (e.g. `*skillsWriteHandler` in skills-mcp) rather than padding `*Server`. Without the cap, server types reliably grow into 30-method god classes.
+
+Surfaced in skills-mcp 2026-05-02: a planned `Server.callerIsAdmin` helper would have pushed `*Server` to 13 methods. Moving it to `*skillsWriteHandler` (which embeds `*Server`) kept the cap intact and put the logic next to the only caller. This is the structural answer the cap was meant to surface.
+
+### CG-03 - When fixing pre-existing failures, keep them in separate commits
+
+If your feature work uncovers test files that were already broken (e.g. a missing `ConfigureKitServer` call from an upstream rename), fix them — that's the ownership rule. But land the fix in its own commit before the feature commit, not bundled inside it. Otherwise reviewers conflate the two scopes and `git revert` of the feature also reverts the unrelated test fix.
+
+Surfaced in skills-mcp 2026-04-30: `internal/server/api_test.go`, `auth_flow_test.go`, and `oidc/oauth_flow_test.go` test fixes were bundled into Task 1.8's search commit. The reviewer flagged the non-atomic boundary and tracked it as a process note for future PRs.
