@@ -75,9 +75,9 @@ Vorrent verification that passed during the migration:
   - disposable `cancel_transcode_job` returned canceled status.
 - Security follow-up: Vorrent now rejects MCP transcode input/output paths outside app-owned media storage before queueing; a live rerun rejected an outside `/tmp` input and completed an allowed disposable fixture under the resolved Vorrent media/download root.
 
-## Remaining Before Tagging v0.4.0
+## v0.4.0 Tag Status
 
-No Vorrent destructive/fixture-heavy migration blocker remains open. The final Vorrent closeout SHA is recorded above and in the master plan; `v0.4.0` may be tagged from the current kit state after the usual release checks.
+No Vorrent destructive/fixture-heavy migration blocker remains open. The final Vorrent closeout SHA is recorded above and in the master plan. `v0.4.0` was tagged on 2026-05-02.
 
 ## Gotchas
 

@@ -932,7 +932,7 @@ Run the cycle dispatch runbook (template from kit's `docs/dispatch-runbook-templ
 ### Phase 7: Migrate vorrent to kit (v0.4.0 gate)
 
 **Repo:** `/Volumes/Dev/HaakCo/AiProjects/vorrent/`
-**Status:** Kit-backed Vorrent migration committed and pushed as `1d6b870d refactor: adopt shared mcp kit` on 2026-05-02. Final Vorrent closeout committed and pushed as `224c52c6 test: close mcp media blocker coverage`, `3c2596d3 fix: include offline subtitle sidecars`, and `f51e78be docs: update offline subtitle package status` on 2026-05-02. Claude Code real-client gate passed against `vorrent-mcp` on 2026-05-02. The destructive/fixture-heavy final blocker passed against the rebuilt kit-backed Vorrent binary on 2026-05-02 with disposable Big Buck Bunny deletion, fixture-backed transcode completion, disposable transcode cancellation, temp OAuth QA user/client cleanup, and MCP transcode path containment. `v0.4.0` is ready for the usual release checks.
+**Status:** Done. Kit-backed Vorrent migration committed and pushed as `1d6b870d refactor: adopt shared mcp kit` on 2026-05-02. Final Vorrent closeout committed and pushed as `224c52c6 test: close mcp media blocker coverage`, `3c2596d3 fix: include offline subtitle sidecars`, and `f51e78be docs: update offline subtitle package status` on 2026-05-02. Claude Code real-client gate passed against `vorrent-mcp` on 2026-05-02. The destructive/fixture-heavy final blocker passed against the rebuilt kit-backed Vorrent binary on 2026-05-02 with disposable Big Buck Bunny deletion, fixture-backed transcode completion, disposable transcode cancellation, temp OAuth QA user/client cleanup, and MCP transcode path containment. `v0.4.0` tagged on 2026-05-02.
 
 **Final Vorrent file shape:**
 - Deleted local MCP middleware: `internal/mcpserver/jsonrpc_envelope.go`, `jsonrpc_envelope_test.go`, `origin.go`, `origin_test.go`.
@@ -960,7 +960,7 @@ Run the cycle dispatch runbook (template from kit's `docs/dispatch-runbook-templ
 
 **Commits (in vorrent):** `1d6b870d refactor: adopt shared mcp kit`; `224c52c6 test: close mcp media blocker coverage`; `3c2596d3 fix: include offline subtitle sidecars`; `f51e78be docs: update offline subtitle package status`
 
-**Kit tag:** pending `v0.4.0` after the usual release checks.
+**Kit tag:** `v0.4.0` on 2026-05-02.
 
 **Effort:** 3 days.
 
