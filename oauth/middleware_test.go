@@ -125,7 +125,7 @@ func TestBearerAcceptsValidJWT(t *testing.T) {
 
 	middleware := oauth.Bearer(oauth.BearerConfig{
 		Introspector:     &mockIntrospector{validTokens: map[string]*fosite.AccessRequest{"valid-token": request}},
-		Now:              func() time.Time { return time.Now() },
+		Now:              time.Now,
 		ExpectedAudience: "https://mcp.example.test/mcp",
 	})
 

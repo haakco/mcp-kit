@@ -63,7 +63,7 @@ func New(cfg Config) (*Server, error) {
 	}
 
 	handler := mcpmw.Envelope(cfg.Handler)
-	handler = oauth.Bearer(oauth.BearerConfig(cfg.Bearer))(handler)
+	handler = oauth.Bearer(cfg.Bearer)(handler)
 	handler = mcpmw.Origin(mcpmw.OriginConfig{
 		Allowed:       cfg.AllowedOrigins,
 		AllowLoopback: cfg.AllowLoopback,

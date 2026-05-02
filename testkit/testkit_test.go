@@ -2,6 +2,7 @@ package testkit_test
 
 import (
 	"context"
+	"errors"
 	"testing"
 
 	"github.com/haakco/mcp-kit/testkit"
@@ -33,7 +34,7 @@ func TestNewUserStoreFindsSingleUser(t *testing.T) {
 	if _, err := store.FindByID(context.Background(), user.ID()); err != nil {
 		t.Fatalf("FindByID: %v", err)
 	}
-	if _, err := store.FindByEmail(context.Background(), "missing@example.com"); err != userstore.ErrNotFound {
+	if _, err := store.FindByEmail(context.Background(), "missing@example.com"); !errors.Is(err, userstore.ErrNotFound) {
 		t.Fatalf("missing err = %v, want ErrNotFound", err)
 	}
 }

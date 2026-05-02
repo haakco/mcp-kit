@@ -3,6 +3,7 @@ package hmacstore
 import (
 	"context"
 	"crypto/rand"
+	"errors"
 	"net/url"
 	"testing"
 	"time"
@@ -40,7 +41,7 @@ func TestStoreRejectsReplay(t *testing.T) {
 	if _, err := store.Consume(context.Background(), token, params); err != nil {
 		t.Fatalf("first consume: %v", err)
 	}
-	if _, err := store.Consume(context.Background(), token, params); err != consent.ErrApprovalTokenInvalid {
+	if _, err := store.Consume(context.Background(), token, params); !errors.Is(err, consent.ErrApprovalTokenInvalid) {
 		t.Fatalf("second consume err = %v, want ErrApprovalTokenInvalid", err)
 	}
 }
@@ -54,7 +55,7 @@ func TestStoreRejectsExpired(t *testing.T) {
 
 	now = now.Add(consent.ApprovalTokenTTL() + time.Second)
 
-	if _, err := store.Consume(context.Background(), token, params); err != consent.ErrApprovalTokenInvalid {
+	if _, err := store.Consume(context.Background(), token, params); !errors.Is(err, consent.ErrApprovalTokenInvalid) {
 		t.Fatalf("expired consume err = %v, want ErrApprovalTokenInvalid", err)
 	}
 }
@@ -65,7 +66,7 @@ func TestStoreRejectsParamMismatch(t *testing.T) {
 	tampered := url.Values{"client_id": {"DIFFERENT"}, "state": {"xxxxxxxx"}}
 	token, _ := store.Issue(context.Background(), oauth.Subject{ID: uuid.NewString()}, original)
 
-	if _, err := store.Consume(context.Background(), token, tampered); err != consent.ErrApprovalTokenInvalid {
+	if _, err := store.Consume(context.Background(), token, tampered); !errors.Is(err, consent.ErrApprovalTokenInvalid) {
 		t.Fatalf("mismatched consume err = %v, want ErrApprovalTokenInvalid", err)
 	}
 }
@@ -74,7 +75,7 @@ func TestStoreRejectsForgedSignature(t *testing.T) {
 	params := url.Values{"client_id": {"abc"}, "state": {"xxxxxxxx"}}
 	token, _ := New(mustRandKey(t), time.Now).Issue(context.Background(), oauth.Subject{ID: uuid.NewString()}, params)
 
-	if _, err := New(mustRandKey(t), time.Now).Consume(context.Background(), token, params); err != consent.ErrApprovalTokenInvalid {
+	if _, err := New(mustRandKey(t), time.Now).Consume(context.Background(), token, params); !errors.Is(err, consent.ErrApprovalTokenInvalid) {
 		t.Fatalf("forged-key consume err = %v, want ErrApprovalTokenInvalid", err)
 	}
 }

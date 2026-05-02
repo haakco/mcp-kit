@@ -1,0 +1,95 @@
+version: "2"
+
+run:
+  timeout: 10m
+  tests: true
+  modules-download-mode: readonly
+  relative-path-mode: gomod
+
+linters:
+  default: none
+  enable:
+    # Correctness
+    - govet
+    - ineffassign
+    - staticcheck
+    - unused
+
+    # Error handling
+    - bodyclose
+    - errcheck
+    - errorlint
+    - nilerr
+
+    # Maintainability
+    - gocritic
+    - misspell
+    - prealloc
+    - unconvert
+    - whitespace
+
+    # Deep / structural checks
+    - dupl
+    - funlen
+    - gocognit
+    - gocyclo
+    - nestif
+
+    # Security
+    - gosec
+
+  settings:
+    dupl:
+      threshold: 100
+    funlen:
+      lines: 100
+      statements: 50
+      ignore-comments: true
+    gocognit:
+      min-complexity: 35
+    gocyclo:
+      min-complexity: 18
+    nestif:
+      min-complexity: 5
+    gosec:
+      excludes:
+        - G104 # Explicitly ignored best-effort writes/audit emits are common in HTTP handlers.
+        - G101 # Config field names such as Secret are not hardcoded credentials.
+        - G117 # OAuth response structs intentionally expose client_secret fields.
+    gocritic:
+      enabled-tags:
+        - diagnostic
+        - performance
+      disabled-checks:
+        - ifElseChain
+        - singleCaseSwitch
+        - hugeParam # Public API structs are intentionally passed by value in this library.
+        - rangeValCopy
+    errcheck:
+      exclude-functions:
+        - (io.Closer).Close
+        - (io.ReadCloser).Close
+        - (*os.File).Close
+        - (net/http.ResponseWriter).Write
+        - (*encoding/json.Encoder).Encode
+
+  exclusions:
+    generated: strict
+    presets:
+      - std-error-handling
+      - common-false-positives
+    rules:
+      - path: _test\.go
+        linters:
+          - funlen
+          - gosec
+          - gocognit
+
+issues:
+  max-issues-per-linter: 0
+  max-same-issues: 0
+
+output:
+  formats:
+    text:
+      path: stdout
