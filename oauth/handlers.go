@@ -10,9 +10,13 @@ import (
 // SubjectResolver returns the authenticated subject for an authorize request.
 type SubjectResolver func(r *http.Request) (Subject, error)
 
-// AuthorizeHandler returns an OAuth authorization endpoint. Consumers are
-// responsible for authenticating the browser request and collecting consent
-// before this handler grants requested scopes.
+// AuthorizeHandler returns an OAuth authorization endpoint that grants
+// requested scopes immediately to whatever SubjectResolver returns.
+//
+// This is a demo handler. It does not authenticate the browser session, does
+// not collect explicit user consent, and does not bind the canonical resource
+// audience server-side per RFC 8707. Production servers should replace it with
+// oauth/consent.NewHandler.
 func (p *Provider) AuthorizeHandler(resolve SubjectResolver) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		ctx := r.Context()

@@ -8,6 +8,11 @@ The module is pre-1.0. Breaking API changes are allowed between minor versions a
 
 ### Added
 
+- `oauth/consent` — production-oriented authorization endpoint helper shared across Go MCP servers, with `Authenticator`, `Renderer`, `ApprovalTokenStore`, `ConsentPolicy`, and `ChallengeProvider` interfaces.
+- `oauth/consent/hmacstore` and `oauth/consent/sessionstore` — stock approval-token backends for stateless and session-backed consent flows.
+- `oauth/consent/consenttest` — fixtures for in-memory provider setup and canonical consent-handler tests.
+- `oauth.Subject.Extra map[string]any` — additive field propagated to OIDC session claims via `oauth.NewSession`.
+- `oauth.consent.approved` and `oauth.consent.denied` audit event names for consent decisions.
 - `docs/recipes/admin-gate.md` — pattern doc for enforcing admin-only mutations consistently across HTTP API + MCP surfaces. Sourced from skills-mcp Phase 1.5 / Phase 1 validation findings (privilege-escalation bug in the MCP `update_skill` tool path).
 - `docs/lessons.md` — added `AG-*` (authz gotchas) and `CG-*` (code-quality gotchas) sections:
   - `AG-01` — cross-surface admin gates must live in the service layer or every handler must enforce.
@@ -18,7 +23,9 @@ The module is pre-1.0. Breaking API changes are allowed between minor versions a
   - `CG-02` — methods-per-receiver caps catch god-classes early; prefer composition when the cap fires.
   - `CG-03` — atomic commit etiquette for pre-existing test fixes during feature work.
 
-These are documentation-only changes. No code or interface surface affected.
+### Changed
+
+- `Provider.AuthorizeHandler` docstring now calls out that it is demo-oriented and points production consumers to `oauth/consent`. Behavior is unchanged.
 
 ## v0.1.0 - 2026-05-01
 

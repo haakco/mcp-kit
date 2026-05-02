@@ -32,6 +32,7 @@ import (
 
     "github.com/haakco/mcp-kit/mcpkit"
     "github.com/haakco/mcp-kit/oauth"
+    "github.com/haakco/mcp-kit/oauth/consent"
     "github.com/haakco/mcp-kit/oidc"
 )
 
@@ -67,7 +68,16 @@ func main() {
     // 3. Mount on your HTTP framework.
     mux := http.NewServeMux()
     mux.Handle("/mcp", mcpServer.Handler())
-    mux.Handle("/oauth/authorize", oauthProv.AuthorizeHandler(myapp.ResolveSubject))
+    authorize, err := consent.NewHandler(consent.Config{
+        Provider:       oauthProv,
+        Authenticator:  myapp.NewAuthenticator(db),
+        Renderer:       myapp.NewConsentRenderer(),
+        PublicURL:      "https://my-mcp.example.com",
+        ApprovalSecret: myapp.OAuthApprovalSecret(), // exactly 32 bytes
+        AuditEmitter:   myapp.NewAuditEmitter(db),
+    })
+    if err != nil { /* handle */ }
+    mux.Handle("/oauth/authorize", authorize)
     mux.Handle("/oauth/token", oauthProv.TokenHandler())
     mux.Handle("/oauth/register", oauthProv.RegisterHandler())
 
