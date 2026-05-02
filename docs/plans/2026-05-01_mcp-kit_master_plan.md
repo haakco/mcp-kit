@@ -932,6 +932,7 @@ Run the cycle dispatch runbook (template from kit's `docs/dispatch-runbook-templ
 ### Phase 7: Migrate vorrent to kit (v0.4.0 gate)
 
 **Repo:** `/Volumes/Dev/HaakCo/AiProjects/vorrent/`
+**Status:** Kit-backed Vorrent migration committed and pushed as `1d6b870d refactor: adopt shared mcp kit` on 2026-05-02. `v0.4.0` is not tagged yet because the full destructive/fixture-heavy P0-P10 cycle and Claude Code real-client gate remain unproven in the migration pass.
 
 **Files (vorrent, modified or deleted):**
 - Delete: `internal/api/mcp_oauth.go`, `mcp_oauth_register.go`
@@ -964,9 +965,9 @@ Run the cycle dispatch runbook (template from kit's `docs/dispatch-runbook-templ
 - LOC delta: net deletion of ~1500 lines.
 - Kit gains: key rotation + PAT (vorrent didn't have these before).
 
-**Commit (in vorrent):** `refactor(mcp): adopt mcp-kit; remove vendored OAuth + middleware`
+**Commit (in vorrent):** `1d6b870d refactor: adopt shared mcp kit`
 
-**Kit tag:** `v0.4.0`.
+**Kit tag:** pending `v0.4.0` after the remaining live-client gates close.
 
 **Effort:** 3 days.
 
