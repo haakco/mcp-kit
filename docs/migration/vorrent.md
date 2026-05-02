@@ -29,7 +29,7 @@ Vorrent did not need a separate `internal/kitwiring` package for this pass. It a
 - `vorrentMCPClientRegistrar` in `internal/api/mcp_oauth_register.go` persists kit-generated dynamic clients into Vorrent's existing Ent OAuth client table.
 - `internal/mcpserver/auth.go` reads scopes from `github.com/haakco/mcp-kit/oauth`.
 
-The app-specific OAuth route files remain active as thin glue. They are not legacy fallback paths; they mount kit handlers and adapt Vorrent's existing persistence/audit model.
+The app-specific OAuth route files remain active as thin glue. They do not provide a compatibility path; they mount kit handlers and adapt Vorrent's existing persistence/audit model.
 
 ## Kit Changes Required By Vorrent
 

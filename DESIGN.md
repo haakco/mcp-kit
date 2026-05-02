@@ -26,9 +26,9 @@ This is **only** for Go services. HaakCo also has Laravel-based MCP work — tha
 The kit deliberately does **not**:
 
 - **Ship tools, resources, or prompts.** Domain logic stays in the consumer.
-- **Provide a user table or password store.** Consumers have their own — kit accepts `UserStore` interface.
-- **Provide an authz/RBAC model.** Consumers have their own — kit accepts `AuthzService` interface.
-- **Provide an audit-log table.** Consumers have their own — kit accepts `AuditEmitter` interface.
+- **Provide a user table or password store.** Consumers authenticate browser consent and map OAuth subjects.
+- **Provide an authz/RBAC model.** Consumers enforce tool/resource authorization in their domain layer.
+- **Provide an audit-log table.** Consumers map kit and domain events into their own audit system.
 - **Lock to a single HTTP framework.** Returns `http.Handler`; consumer wraps in stdlib mux, Echo, Chi, Gin, whatever.
 - **Lock to a single database.** Default Ent adapters ship; the storage layer is interface-based so a non-Ent app could plug in.
 - **Cross language boundaries.** Laravel/Node MCP servers don't depend on this kit. The cycle methodology and design principles transfer; the code does not.
@@ -93,7 +93,7 @@ mcp-kit/
 │
 ├── mcpmw/                              # MCP-specific middleware
 │   ├── envelope.go                     # JSON-RPC envelope rewriter (Vorrent's contribution)
-│   ├── origin.go                       # Origin allowlist with loopback fallback
+│   ├── origin.go                       # Origin allowlist with explicit loopback allowance
 │   ├── audit.go                        # Audit emitter wrapper for tool calls
 │   └── *_test.go
 │
@@ -115,12 +115,10 @@ mcp-kit/
 │
 ├── audit/                              # Audit interface + redaction helpers
 │   ├── emitter.go                      # AuditEmitter interface
-│   ├── redact.go                       # Path-based field redaction
 │   └── *_test.go
 │
 ├── userstore/                          # UserStore interface + reference helpers
 │   ├── store.go                        # UserStore interface
-│   ├── bcrypt.go                       # Bcrypt password verify helper
 │   └── *_test.go
 │
 ├── authz/                              # Authz interface
@@ -150,42 +148,41 @@ mcp-kit/
 
 ### `mcpkit.Config` and `mcpkit.New()`
 
-The top-level entry point. Composes the SDK server, the kit's middleware, and exposes a single `http.Handler`.
+The top-level entry point. Consumers create the official Go SDK server,
+convert it to an `http.Handler`, then pass that handler to the kit for
+Origin, bearer-token, and JSON-RPC envelope middleware.
 
 ```go
 package mcpkit
 
 import (
-    "github.com/modelcontextprotocol/go-sdk/mcp"
-    "github.com/haakco/mcp-kit/oauth"
+    "net/http"
+
     "github.com/haakco/mcp-kit/audit"
+    "github.com/haakco/mcp-kit/oauth"
 )
 
 type Config struct {
-    // Implementation identifies the MCP server. Required.
-    Implementation mcp.Implementation
+    // Handler is the official Go SDK MCP HTTP handler before kit middleware.
+    Handler http.Handler
 
-    // Instructions are the server-level guidance shown to clients on initialize.
-    Instructions string
+    // Bearer authenticates bearer tokens before the SDK handler.
+    Bearer BearerConfig
 
-    // Validator authenticates bearer tokens. Required.
-    // Typically obtained from oauth.Provider.TokenValidator().
+    // Validator is deprecated. Use Bearer.TokenValidator.
     Validator oauth.TokenValidator
 
     // AllowedOrigins is the Origin header allowlist for browser clients.
-    // Empty means "no browser clients". Loopback is treated separately.
     AllowedOrigins []string
 
     // AllowLoopback permits Origin: http://127.0.0.1[:port], http://localhost[:port],
     // http://[::1][:port]. Default false. Set true in dev.
     AllowLoopback bool
 
-    // AuditEmitter receives tool-call audit events. Required for production.
+    // AuditEmitter receives kit-owned audit events. Domain tool-call authz and
+    // audit stay in the consumer-owned SDK tool handlers.
     // For tests, use audit.Discard.
     AuditEmitter audit.Emitter
-
-    // Logger is the structured logger. Defaults to slog.Default().
-    Logger *slog.Logger
 }
 
 type Server struct { /* unexported */ }
@@ -196,11 +193,8 @@ func New(cfg Config) (*Server, error)
 // It composes (in outer-to-inner order): origin → bearer → envelope → MCP SDK.
 func (s *Server) Handler() http.Handler
 
-// SDK returns the underlying mcp.Server so consumers can register tools/resources/prompts.
-func (s *Server) SDK() *mcp.Server
-
-// Health returns a snapshot for /healthz endpoints.
-func (s *Server) Health() HealthSnapshot
+// Domain tools, resources, and prompts are registered on the consumer-owned
+// official SDK server before passing its HTTP handler to mcpkit.New.
 ```
 
 ### `oauth.Config` and `oauth.New()`
@@ -215,46 +209,28 @@ type Config struct {
     // MUST match the URL clients see — used in discovery + token aud claim.
     Issuer string
 
-    // EntClient is the Ent client backing storage. Required for the default storage adapter.
-    EntClient *ent.Client
+    // Store persists OAuth clients and grants.
+    Store storage.Store
 
-    // UserStore resolves credentials and looks up users by ID. Required.
-    UserStore userstore.Store
+    // KeyManager owns signing keys and JWKS.
+    KeyManager *keys.Manager
 
-    // AuditEmitter logs OAuth events. Required for production.
-    AuditEmitter audit.Emitter
-
-    // KeyRotation configures the signing-key rotator. See keys.RotationConfig.
-    // Zero value uses keys.DefaultRotation (90d interval, 48h grace).
-    KeyRotation keys.RotationConfig
-
-    // AccessTokenLifespan defaults to 15min.
+    // AccessTokenLifespan defaults to 1h.
     AccessTokenLifespan time.Duration
-    // RefreshTokenLifespan defaults to 30 days.
+    // RefreshTokenLifespan defaults to 24h.
     RefreshTokenLifespan time.Duration
-    // AuthorizationCodeLifespan defaults to 60s.
+    // AuthorizationCodeLifespan defaults to 10m.
     AuthorizationCodeLifespan time.Duration
-
-    // Logger is the structured logger. Defaults to slog.Default().
-    Logger *slog.Logger
 }
 
 type Provider struct { /* unexported */ }
 
 func New(cfg Config) (*Provider, error)
 
-// TokenValidator returns a Validator that resolves both OAuth-issued JWTs and PATs.
-func (p *Provider) TokenValidator() TokenValidator
-
-// RegisterRoutes mounts /authorize, /token, /register, /revoke on mux.
-// Path prefix is configurable; default is "/mcp-oauth".
-func (p *Provider) RegisterRoutes(mux *http.ServeMux, opts ...RouteOption)
-
-// DiscoveryConfig returns the metadata used by oidc.RegisterRoutes.
-func (p *Provider) DiscoveryConfig() oidc.DiscoveryConfig
-
-// StartKeyRotator launches the rotation goroutine. Call once on server startup; cancel via ctx.
-func (p *Provider) StartKeyRotator(ctx context.Context) error
+func (p *Provider) OAuth2Provider() fosite.OAuth2Provider
+func (p *Provider) AuthorizeHandler(resolve SubjectResolver) http.Handler
+func (p *Provider) TokenHandler() http.Handler
+func (p *Provider) RegisterHandler() http.Handler
 ```
 
 ### Interfaces consumers implement
@@ -304,10 +280,8 @@ type Emitter interface {
     Emit(ctx context.Context, event Event) error
 }
 
-// Helpers
-func Discard() Emitter                          // for tests
-func Slog(logger *slog.Logger) Emitter          // for dev
-func Redact(e Emitter, paths []string) Emitter  // strips keys from Metadata
+// Helper
+func Discard() Emitter // for tests
 ```
 
 ```go
@@ -342,12 +316,10 @@ type OriginConfig struct {
 }
 func Origin(cfg OriginConfig, next http.Handler) http.Handler
 
-// Audit wraps the SDK handler so every tool call emits a before/after event.
-type AuditConfig struct {
-    Emitter        audit.Emitter
-    RedactPayload  []string // JSON paths to redact from logged params
-}
-func Audit(cfg AuditConfig, next http.Handler) http.Handler
+// Tool-call audit belongs in the consumer's SDK tool handlers because only the
+// consumer knows which domain fields are sensitive and which RBAC decision was
+// made. Kit audit primitives are available for consumer adapters and future
+// kit-owned events.
 ```
 
 ### `entschema` — opt-in mixins
@@ -399,8 +371,6 @@ import (
     "github.com/haakco/mcp-kit/mcpkit"
     "github.com/haakco/mcp-kit/oauth"
     "github.com/haakco/mcp-kit/oidc"
-    "github.com/haakco/mcp-kit/userstore"
-
     "github.com/modelcontextprotocol/go-sdk/mcp"
 
     "myapp/ent"
@@ -414,52 +384,57 @@ func main() {
     drv := entsql.OpenDB(dialect.SQLite, db)
     entClient := ent.NewClient(ent.Driver(drv))
 
-    // Wrap the consumer's user table.
-    users := myauth.NewUserStore(entClient)
-
     // Wrap the consumer's audit log.
     auditEmit := myauth.NewAuditEmitter(entClient)
 
     // Construct the OAuth provider.
     oauthProv, err := oauth.New(oauth.Config{
-        Issuer:       "https://my-mcp.example.com",
-        EntClient:    entClient,
-        UserStore:    users,
-        AuditEmitter: auditEmit,
-        Logger:       logger,
+        Issuer:        "https://my-mcp.example.com",
+        Store:         myapp.NewOAuthStore(entClient),
+        KeyManager:    myapp.NewOAuthKeyManager(entClient),
+        AllowedScopes: []string{"mcp.read", "mcp.write", "offline_access"},
+        DefaultScopes: []string{"mcp.read", "offline_access"},
     })
     if err != nil { panic(err) }
 
-    // Construct the MCP server.
+    // Construct the consumer-owned SDK server and wrap its handler with the kit.
+    sdkServer := mcp.NewServer(&mcp.Implementation{Name: "my-mcp", Version: "0.1.0"}, nil)
+    sdkHandler := mcp.NewStreamableHTTPHandler(func(*http.Request) *mcp.Server {
+        return sdkServer
+    }, nil)
     mcpServer, err := mcpkit.New(mcpkit.Config{
-        Implementation: mcp.Implementation{Name: "my-mcp", Version: "0.1.0"},
-        Instructions:   "Use search_skill to find skills...",
-        Validator:      oauthProv.TokenValidator(),
+        Handler: sdkHandler,
+        Bearer: mcpkit.BearerConfig{
+            Introspector:    oauthProv.OAuth2Provider(),
+            SessionFactory: oauth.NewEmptySession,
+        },
         AllowedOrigins: []string{"https://app.example.com"},
         AllowLoopback:  isDev(),
         AuditEmitter:   auditEmit,
-        Logger:         logger,
     })
     if err != nil { panic(err) }
 
-    // Register the consumer's tools/resources/prompts.
-    mytools.Register(mcpServer.SDK(), entClient, users)
+    // Register the consumer's tools/resources/prompts on the consumer-owned SDK server.
+    mytools.Register(sdkServer, entClient, users)
 
     // Start the key rotator.
     ctx, cancel := context.WithCancel(context.Background())
     defer cancel()
+    rotator := keys.NewRotator(myapp.NewOAuthKeyManager(entClient), keys.RotationConfig{}, logger)
     go func() {
-        if err := oauthProv.StartKeyRotator(ctx); err != nil {
-            logger.Error("key rotator stopped", "error", err)
-        }
+        rotator.Run(ctx)
     }()
 
     // Mount on stdlib mux.
     mux := http.NewServeMux()
     mux.Handle("/mcp", mcpServer.Handler())
-    oauthProv.RegisterRoutes(mux)
-    oidc.RegisterRoutes(mux, oauthProv.DiscoveryConfig())
-    mux.HandleFunc("/healthz", healthHandler(mcpServer))
+    oauthProv.RegisterRoutes(mux, "/oauth", myauth.ResolveSubject)
+    discovery := oidc.NewDiscoveryConfig("https://my-mcp.example.com", []string{"mcp.read", "mcp.write", "offline_access"})
+    discovery.RegisterRoutes(mux, oidc.RouteConfig{
+        ResourceURL: "https://my-mcp.example.com/mcp",
+        JWKS:        oidc.JWKSHandler(myapp.NewOAuthKeyManager(entClient)),
+    })
+    mux.HandleFunc("/healthz", healthHandler)
 
     if err := http.ListenAndServe(":8080", mux); err != nil { panic(err) }
 }

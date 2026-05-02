@@ -11,7 +11,7 @@ A reusable Go library for building production-grade Model Context Protocol (MCP)
 - **OAuth 2.1 server** with PKCE, dynamic client registration, refresh-token rotation, and 90-day signing-key rotation with grace window
 - **Bearer middleware** that accepts both OAuth-issued JWTs and Personal Access Tokens
 - **JSON-RPC envelope rewriter** so SDK protocol errors come out as canonical JSON-RPC envelopes (not plain-text 400s)
-- **Origin allowlist** with explicit loopback fallback for browser MCP clients
+- **Origin allowlist** with explicit loopback allowance for browser MCP clients
 - **OIDC / OAuth discovery endpoints** (`/.well-known/openid-configuration`, `/.well-known/oauth-authorization-server`, `/.well-known/oauth-protected-resource`, `/.well-known/jwks.json`)
 - **CLI auth helper** (`mcpkit/cliauth`) with browser-based PKCE flow and issuer-scoped 0600 file-backed token cache
 - **Ent schema mixins** for OAuth tables (`oauth_client`, `oauth_signing_key`, `oauth_authorization_code`, `oauth_access_token`, `oauth_refresh_token`, `personal_access_token`)
@@ -20,61 +20,78 @@ A reusable Go library for building production-grade Model Context Protocol (MCP)
 It does **not** ship:
 
 - Domain tools, resources, or prompts — those live in the consumer
-- A user table or password store — consumer provides via `UserStore` interface
-- A permission/RBAC model — consumer provides via `AuthzService` interface
-- An audit log table — consumer provides via `AuditEmitter` interface
+- A user table or password store — consumers authenticate browser consent and map subjects themselves
+- A permission/RBAC model — consumers enforce tool/resource authorization in their domain layer
+- An audit log table — consumers map kit and domain events into their own audit system
 
 ## Quickstart
 
 ```go
 import (
+    "net/http"
+
     "github.com/haakco/mcp-kit/mcpkit"
-    "github.com/haakco/mcp-kit/mcpkit/oauth"
-    "github.com/haakco/mcp-kit/mcpkit/oidc"
+    "github.com/haakco/mcp-kit/oauth"
+    "github.com/haakco/mcp-kit/oidc"
 )
 
 func main() {
-    // 1. Provide your app's user/authz/audit implementations.
-    userStore := myapp.NewUserStore(db)
-    authz := myapp.NewAuthz(db)
-    audit := myapp.NewAuditEmitter(db)
-
-    // 2. Construct the OAuth provider.
+    // 1. Construct the OAuth provider using your app's storage + key manager.
     oauthProv, err := oauth.New(oauth.Config{
         Issuer:        "https://my-mcp.example.com",
-        EntClient:     entClient,
-        UserStore:     userStore,
-        AuditEmitter:  audit,
-        KeyRotation:   oauth.DefaultKeyRotation, // 90d / 48h grace
+        Store:         myapp.NewOAuthStore(db),
+        KeyManager:    myapp.NewOAuthKeyManager(db),
+        AllowedScopes: []string{"mcp.read", "mcp.write", "offline_access"},
+        DefaultScopes: []string{"mcp.read", "offline_access"},
     })
     if err != nil { /* handle */ }
 
-    // 3. Construct the MCP server.
-    mcpServer := mcpkit.New(mcpkit.Config{
-        Implementation: mcp.Implementation{Name: "my-mcp", Version: "0.1.0"},
-        Validator:      oauthProv.TokenValidator(),
+    // 2. Wrap your official Go SDK MCP HTTP handler.
+    // The handler still owns domain authorization and audit: validate scopes,
+    // check RBAC, and emit audit events inside each tool/resource.
+    mcpServer, err := mcpkit.New(mcpkit.Config{
+        Handler: myapp.NewAuditedMCPHandler(myapp.MCPDeps{
+            Authz: myapp.NewAuthz(db),
+            Audit: myapp.NewAuditEmitter(db),
+        }),
+        Bearer: mcpkit.BearerConfig{
+            TokenValidator: myapp.NewPATValidator(db),
+            Introspector:   oauthProv.OAuth2Provider(),
+            SessionFactory: oauth.NewEmptySession,
+        },
         AllowedOrigins: []string{"https://app.example.com"},
         AllowLoopback:  isDev,
     })
+    if err != nil { /* handle */ }
 
-    // 4. Register your tools/resources/prompts.
-    myapp.RegisterTools(mcpServer, deps)
-
-    // 5. Mount on your HTTP framework.
+    // 3. Mount on your HTTP framework.
     mux := http.NewServeMux()
     mux.Handle("/mcp", mcpServer.Handler())
-    oauthProv.RegisterRoutes(mux)
-    oidc.RegisterRoutes(mux, oauthProv.DiscoveryConfig())
+    mux.Handle("/oauth/authorize", oauthProv.AuthorizeHandler(myapp.ResolveSubject))
+    mux.Handle("/oauth/token", oauthProv.TokenHandler())
+    mux.Handle("/oauth/register", oauthProv.RegisterHandler())
+
+    discovery := oidc.NewDiscoveryConfig("https://my-mcp.example.com", []string{"mcp.read", "mcp.write", "offline_access"})
+    discovery.RegisterRoutes(mux, oidc.RouteConfig{
+        ResourceURL: "https://my-mcp.example.com/mcp",
+        JWKS:        oidc.JWKSHandler(myapp.NewOAuthKeyManager(db)),
+    })
 
     http.ListenAndServe(":8080", mux)
 }
 ```
 
+Authentication is not authorization. `mcp-kit` validates bearer tokens, Origin,
+metadata, and JSON-RPC envelope behavior. Consumers must still enforce
+tool/resource permissions and audit every sensitive domain operation in their
+handlers.
+
 ## Documentation
 
 - [DESIGN.md](DESIGN.md) — full design rationale, package layout, public API
-- [docs/migration/skills-mcp.md](docs/migration/skills-mcp.md) — *(coming with v0.2.0)* migrating from skills-mcp's vendored OAuth
-- [docs/migration/vorrent.md](docs/migration/vorrent.md) — *(coming with v0.2.0)* migrating from Vorrent's vendored MCP server
+- [docs/migration/skills-mcp.md](docs/migration/skills-mcp.md) — migration notes from the donor Skills MCP server
+- [docs/migration/vorrent.md](docs/migration/vorrent.md) — migration notes from Vorrent's kit-backed closeout
+- [docs/migration/from-mark3labs.md](docs/migration/from-mark3labs.md) — moving a Go MCP server from mark3labs to the official Go SDK
 - [docs/cycle-methodology.md](docs/cycle-methodology.md) — the E2E testing protocol
 - [docs/lessons.md](docs/lessons.md) — reusable MCP OAuth, JSON-RPC, and transport lessons
 - [docs/dispatch-runbook-template.md](docs/dispatch-runbook-template.md) — live-client runbook template for consumers
@@ -85,9 +102,9 @@ func main() {
 |---|---|
 | Design | ✅ — see [DESIGN.md](DESIGN.md) |
 | v0.1.0 spike — package skeletons + envelope middleware | ✅ Complete |
-| v0.2.0 — OAuth core extracted from skills-mcp | Planned |
-| v0.3.0 — skills-mcp migrated to kit | Planned |
-| v0.4.0 — Vorrent migrated to kit | Planned |
+| v0.2.0 — OAuth core extracted from skills-mcp | ✅ Complete |
+| v0.3.0 — skills-mcp migrated to kit | ✅ Complete |
+| v0.4.0 — Vorrent migrated to kit | ✅ Complete |
 | v1.0.0 — Meridian on kit + cycle methodology shipped | Planned |
 
 ## License

@@ -4,18 +4,23 @@
 // Most consumers only need the few public symbols here:
 //   - mcpkit.New     — construct an MCP server with the kit's middleware composed
 //   - mcpkit.Config  — the construction parameters
-//   - mcpkit.Server  — the resulting server with Handler() and SDK() methods
+//   - mcpkit.Server  — the resulting server with Handler()
 //
 // The full public API and design rationale live in DESIGN.md at the repo root.
 //
 // # Quickstart
 //
+//	// sdkHandler is the consumer-owned official SDK handler. Register tools on
+//	// that SDK server, and enforce domain authz/audit inside those tool handlers.
 //	mcpServer, err := mcpkit.New(mcpkit.Config{
-//	    Implementation: mcp.Implementation{Name: "my-mcp", Version: "0.1.0"},
-//	    Validator:      oauthProv.TokenValidator(),
+//	    Handler: sdkHandler,
+//	    Bearer: mcpkit.BearerConfig{
+//	        Introspector:    oauthProv.OAuth2Provider(),
+//	        SessionFactory: oauth.NewEmptySession,
+//	    },
 //	    AllowedOrigins: []string{"https://app.example.com"},
 //	    AllowLoopback:  isDev,
-//	    AuditEmitter:   audit.Discard(),
+//	    AuditEmitter:   myAuditEmitter,
 //	})
 //	if err != nil { return err }
 //
@@ -23,9 +28,7 @@
 //
 // # Status
 //
-// v0.1.0 is a skeleton. mcpkit.New currently returns ErrNotImplemented; the
-// JSON-RPC envelope middleware (mcpmw.Envelope) and Origin allowlist
-// (mcpmw.Origin) ARE working and tested — consumers wanting just those two
-// can use them standalone. v0.2.0 will land the full OAuth core extracted
-// from skills-mcp.
+// v0.4.0 wraps a consumer-owned SDK HTTP handler with the kit's JSON-RPC
+// envelope, bearer, and Origin middleware. Domain tools, resources, and prompts
+// remain owned by the consumer's SDK server.
 package mcpkit

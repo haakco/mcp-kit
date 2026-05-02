@@ -169,7 +169,7 @@ This plan references concrete code in five locations. All paths are absolute on 
 - `/Users/timhaak/Dev/HaakCo/AiProjects/skills/apps/skills-mcp/internal/cliauth/pkce.go` — RFC 7636 conformant PKCE pair gen. Direct port.
 - `/Users/timhaak/Dev/HaakCo/AiProjects/skills/apps/skills-mcp/internal/server/server.go` — server bundle pattern + reflection-based registry snapshot. Selected pieces inform kit's `mcpkit/server.go`.
 - `/Users/timhaak/Dev/mairin/meridian/backend/cmd/api/main.go` — confirmed Echo v5 wiring, identified injection points for kit (`server.New()`).
-- `/Users/timhaak/Dev/mairin/meridian/backend/internal/auth/jwt/jwt.go` — confirmed JWT-only auth today; kit OAuth coexists at separate path (`/mcp-oauth/*`).
+- `/Users/timhaak/Dev/mairin/meridian/backend/internal/auth/jwt/jwt.go` — confirmed JWT-only auth today; kit OAuth coexists at separate path (`/oauth/*`).
 
 **v0.1.0 already shipped (commit `5aedbba`):**
 
@@ -177,7 +177,7 @@ This plan references concrete code in five locations. All paths are absolute on 
 - `mcp-kit/DESIGN.md` — full design with package layout, public API, migration paths
 - `mcp-kit/go.mod` — module declaration, go 1.26
 - `mcp-kit/mcpmw/envelope.go` + `_test.go` — JSON-RPC envelope rewriter ported from Vorrent (6 tests passing)
-- `mcp-kit/mcpmw/origin.go` + `_test.go` — Origin allowlist with loopback fallback (6 tests passing)
+- `mcp-kit/mcpmw/origin.go` + `_test.go` — Origin allowlist with explicit loopback allowance (6 tests passing)
 - `mcp-kit/audit/emitter.go` — `Emitter` interface + `Discard()` helper
 - `mcp-kit/userstore/store.go` — `User` + `Store` interfaces, `ErrNotFound`, `ErrInvalidCredentials`
 - `mcp-kit/authz/authz.go` — `Service` interface, `ErrForbidden`, `AlwaysAllow()` for tests
@@ -313,18 +313,18 @@ Expected: PASS, all 4+ tests green.
 #### Sub-step 3.2: Fosite storage (1 day)
 
 **Files (kit, create):**
-- `mcp-kit/oauth/storage/storage.go` — Fosite storage interface composition
-- `mcp-kit/oauth/storage/ent.go` — Ent-backed implementation (default)
-- `mcp-kit/oauth/storage/storage_test.go` — interface compliance tests
-- `mcp-kit/oauth/storage/ent_test.go` — roundtrip tests
+- `mcp-kit/oauth/storage/storage.go` — Fosite storage adapter over the kit's storage interface
+- `mcp-kit/oauth/storage/memory.go` — in-memory test/reference implementation
+- `mcp-kit/oauth/storage/storage_test.go` — interface compliance and roundtrip tests
 
 **Direct port from:**
 - `/Users/timhaak/Dev/HaakCo/AiProjects/skills/apps/skills-mcp/internal/oidc/storage.go` → `ent.go`
 
 **Substitutions:**
-- All `*ent.Client` references stay (kit defaults to Ent)
-- Schema-specific entity types (`ent.OauthClient` etc.) → consumer's Ent client; kit's `entschema/` mixins guarantee field shape
-- Tests use in-memory SQLite Ent client
+- Do not bake a generated consumer `*ent.Client` into the kit.
+- Consumers implement `oauth/storage.Store` using their own persistence layer.
+- Kit `entschema/` mixins guarantee field shape for Ent consumers, while the OAuth provider depends only on the storage interface.
+- Tests use the in-memory storage implementation.
 
 **Tests required (3 minimum):**
 - `TestStorage_AuthCodeRoundtrip` — store → retrieve → invalidate
@@ -354,7 +354,7 @@ go test ./oauth/storage/... -count=1
 
 **Substitutions:**
 - `service.UserService.FindByEmail(...)` → `userstore.Store.FindByEmail(...)`
-- `service.UserService.VerifyPassword(...)` → `userstore.VerifyPassword(...)` helper
+- Existing password hash checks → `oauth.VerifyPassword(hash, password)` helper
 - HTML login template stays in skills-mcp; kit's `/authorize` returns JSON-only (per Open Question 2 in DESIGN.md)
 - Audience defaults to canonical `<issuer>/mcp` (lesson from Vorrent ISSUE-002)
 
@@ -750,44 +750,61 @@ go test ./ent/... -count=1
 
 **Commit:** `refactor(ent): compose kit mixins for OAuth + PAT schemas`
 
-#### Sub-step 6.4: Wire kit in main (parallel mount) (1 day)
+#### Sub-step 6.4: Wire kit in main (replace old mount) (1 day)
 
 **Files (skills-mcp, modify):**
 - `apps/skills-mcp/cmd/skills-mcp/main.go` — add kit construction
-- `apps/skills-mcp/internal/server/server.go` — add `ServeKitHTTP()` method that mounts at `/mcp-v2`
+- `apps/skills-mcp/internal/server/server.go` — create the official SDK server, register tools, and expose its Streamable HTTP handler through `mcpkit.New`
 
 **Pattern:**
 ```go
 // In main.go after existing server setup:
 oauthProv, _ := oauth.New(oauth.Config{
-    Issuer:       cfg.PublicURL,
-    EntClient:    entClient,
-    UserStore:    kitwiring.NewUserStore(userSvc),
-    AuditEmitter: kitwiring.NewAuditEmitter(auditSvc),
+    Issuer:        cfg.PublicURL,
+    Store:         kitwiring.NewOAuthStore(entClient),
+    KeyManager:    kitwiring.NewOAuthKeyManager(entClient),
+    AllowedScopes: []string{"mcp.read", "offline_access"},
+    DefaultScopes: []string{"mcp.read", "offline_access"},
 })
+
+sdkServer := mcp.NewServer(&mcp.Implementation{Name: "skills-mcp", Version: cfg.Version}, nil)
+skillsmcp.RegisterTools(sdkServer, deps)
+sdkHandler := mcp.NewStreamableHTTPHandler(func(*http.Request) *mcp.Server {
+    return sdkServer
+}, nil)
+
 mcpKitServer, _ := mcpkit.New(mcpkit.Config{
-    Implementation: mcp.Implementation{Name: "skills-mcp", Version: cfg.Version},
-    Validator:      oauthProv.TokenValidator(),
+    Handler: sdkHandler,
+    Bearer: mcpkit.BearerConfig{
+        TokenValidator: kitwiring.NewPATValidator(entClient),
+        Introspector:   oauthProv.OAuth2Provider(),
+        SessionFactory: oauth.NewEmptySession,
+    },
     AllowedOrigins: cfg.AllowedOrigins,
     AllowLoopback:  cfg.IsDev,
     AuditEmitter:   kitwiring.NewAuditEmitter(auditSvc),
 })
 
-mux.Handle("/mcp-v2", mcpKitServer.Handler())
-oauthProv.RegisterRoutes(mux, oauth.WithPathPrefix("/mcp-oauth-v2"))
+mux.Handle("/mcp", mcpKitServer.Handler())
+oauthProv.RegisterRoutes(mux, "/oauth", kitwiring.ResolveSubject(userSvc))
+oidc.NewDiscoveryConfig(cfg.PublicURL, []string{"mcp.read", "offline_access"}).RegisterRoutes(mux, oidc.RouteConfig{
+    ResourceURL: cfg.PublicURL + "/mcp",
+    JWKS:        oidc.JWKSHandler(kitwiring.NewOAuthKeyManager(entClient)),
+})
 ```
 
-**Both mounts active.** Legacy `/mcp` keeps mark3labs; new `/mcp-v2` runs kit.
+**Single path:** `/mcp` is kit-backed after this step. Do not keep a replaced
+mark3labs route, compatibility mount, or dual path.
 
 **Verify:**
 ```bash
 ./bin/skills-mcp serve
-curl http://localhost:8892/.well-known/oauth-authorization-server  # legacy
-curl http://localhost:8892/.well-known/oauth-authorization-server  # check kit's endpoints conflict-free; if so, kit endpoints under /v2 prefix
-curl http://localhost:8892/mcp-v2 -X POST ...                       # new mount responds
+curl http://localhost:8892/.well-known/oauth-authorization-server  # kit discovery
+curl http://localhost:8892/.well-known/oauth-protected-resource     # advertises resource http://localhost:8892/mcp
+curl http://localhost:8892/mcp -X POST ...                          # kit-backed mount responds
 ```
 
-**Commit:** `feat(server): parallel mount kit-backed /mcp-v2 endpoint`
+**Commit:** `feat(server): replace skills mcp transport with mcp-kit`
 
 #### Sub-step 6.5: Migrate tool registration (2 days)
 
@@ -837,27 +854,27 @@ go test ./internal/server/... -run TestRegistry -count=1
 - `refactor(mcp): migrate subscriptions tools to official SDK`
 - `refactor(mcp): migrate tree tools to official SDK`
 
-#### Sub-step 6.6: Cut over (0.5 day)
+#### Sub-step 6.6: Real-client closeout (0.5 day)
 
 **Files (skills-mcp, modify):**
 - `apps/skills-mcp/cmd/skills-mcp/main.go`
 - `apps/skills-mcp/internal/server/server.go`
 
 **Steps:**
-1. Move `/mcp-v2` mount to `/mcp`.
-2. Move `/mcp-oauth-v2/*` mounts to `/mcp-oauth/*`.
-3. Delete legacy mark3labs construction code.
+1. Confirm `/mcp` is the only MCP route.
+2. Confirm OAuth discovery advertises the `/mcp` protected resource.
+3. Confirm no mark3labs construction, compatibility mount, or duplicate route remains.
 
 **Verify:**
 ```bash
 ./bin/skills-mcp serve
-just verify-mcp-clients http://127.0.0.1:8892
+just verify-mcp-clients http://localhost:8892
 ```
 Expected: full suite green against kit-backed binary.
 
-**Commit:** `refactor(server): cut over /mcp to kit; remove mark3labs mount`
+**Commit:** `test(mcp): verify skills mcp-kit real clients`
 
-#### Sub-step 6.7: Delete legacy code (0.5 day)
+#### Sub-step 6.7: Delete replaced code (0.5 day)
 
 **Files (skills-mcp, delete):**
 - `apps/skills-mcp/internal/oidc/discovery.go`
@@ -887,7 +904,7 @@ Expected: full suite green against kit-backed binary.
 go mod tidy
 go build ./...
 go test ./... -count=1 -race
-just verify-mcp-clients http://127.0.0.1:8892
+just verify-mcp-clients http://localhost:8892
 ```
 
 **Commit:** `chore: delete vendored OAuth + cliauth (now in mcp-kit)`
@@ -969,6 +986,7 @@ Run the cycle dispatch runbook (template from kit's `docs/dispatch-runbook-templ
 ### Phase 8: Update meridian add_mcp.md (assumes kit exists)
 
 **Repo:** `/Users/timhaak/Dev/mairin/meridian/`
+**Status:** Done. Meridian `docs/plans/add_mcp.md` was rewritten on 2026-05-02 to pin `github.com/haakco/mcp-kit@v0.4.0`, remove local OAuth/middleware porting assumptions, and keep Meridian-owned healthcare tools/adapters as the implementation scope.
 
 **Files (meridian, modified):**
 - Modify: `docs/plans/add_mcp.md` — rewrite phases 1–6 to depend on `mcp-kit@v0.4.0` instead of "port from skills-mcp" / "port from vorrent". Phase 7 (production hardening) unchanged.
@@ -981,11 +999,11 @@ Run the cycle dispatch runbook (template from kit's `docs/dispatch-runbook-templ
    - Old Phase 4 (Tools) → unchanged (consumer's domain)
    - Old Phase 5 (CLI auth helper) → "Use kit's `cliauth` package"
    - Old Phase 6 (E2E test cycle) → "Apply kit's `docs/cycle-methodology.md`"
-3. Update tech stack section: add `github.com/haakco/mcp-kit v0.4.0+`.
+3. Update tech stack section: add `github.com/haakco/mcp-kit v0.4.0`.
 4. Update healthcare-data sensitivity checklist: reference kit's interfaces (`UserStore`, `AuditEmitter`, `AuthzService`) for where consumer integrates.
-5. Effort: 7d → ~4d.
+5. Effort: ~22d without kit → ~9d with kit.
 
-**Verify:** Plan reviewable in one sitting; no "port from X" language remains.
+**Verify:** Plan reviewable in one sitting; no "port from X" language remains. `git diff --check` passed in the Meridian repo.
 
 **Commit (in meridian):** `docs(plans): rewrite add_mcp.md to adopt mcp-kit`
 
@@ -1035,11 +1053,13 @@ Per the rewritten add_mcp.md from Phase 8.
 ### Phase 10: Update HaakCo skills with universal patterns
 
 **Files (canonical skills repo):**
+**Status:** Done. Canonical skills were versioned directly under `/Users/timhaak/Dev/HaakCo/AiProjects/skills` on 2026-05-02: `haakco-mcp-server-design` `v1.2.3` at `skills/versions/haakco-mcp-server-design/0008`, and `haakco-mcp-plugins` `v1.2.2` at `skills/versions/haakco-mcp-plugins/0005`. These versions use the actual `mcp-kit@v0.4.0` API: consumer-owned official SDK handler passed to `mcpkit.New`, explicit `oauth.Config` storage/key manager adapters, and `oidc.DiscoveryConfig.RegisterRoutes`.
+
 - `/Users/timhaak/Dev/HaakCo/AiProjects/skills/skills/versions/haakco-mcp-server-design/000N/` — bump version, add Go-specific section + universal section
 - `/Users/timhaak/Dev/HaakCo/AiProjects/skills/skills/versions/haakco-mcp-plugins/000N/` — bump version, add reference to mcp-kit as canonical Go server foundation
 
 **Steps:**
-1. From canonical skills repo: `just sync-pull <project>` to pull current state.
+1. From canonical skills repo: create new canonical version directories directly, per project instruction.
 2. Add to `haakco-mcp-server-design/overview.md`:
    - "Go servers: use `github.com/haakco/mcp-kit`" subsection with kit ref
    - "Other servers (Laravel, Node): apply universal patterns below" subsection
@@ -1055,10 +1075,10 @@ Per the rewritten add_mcp.md from Phase 8.
 5. Add to `haakco-mcp-plugins/overview.md`:
    - "Building a new Go MCP server: see mcp-kit"
    - Keep client/runner content unchanged
-6. Bump versions, lastUpdatedAt; push from canonical: `just sync-push <project>`.
-7. From a project (e.g. vorrent): `just sync-pull` to confirm new versions land.
+6. Bump versions and `lastUpdatedAt`.
+7. Regenerate canonical catalog/index and validate sync metadata.
 
-**Verify:** `cat /Volumes/Dev/HaakCo/AiProjects/vorrent/.skills/haakco-mcp-server-design/metadata.yaml` shows new version + lastUpdatedAt.
+**Verify:** `just sync-validate` passed, `just sync-catalog` passed, `just sync-index` passed, and `git diff --check` passed in the skills repo. `just skills-health` remains blocked by a pre-existing unrelated `vorrent-adb-mobile-testing` unknown tag issue (`android`, `qa`).
 
 **Commit (in canonical skills):** `chore(skills): mcp-kit references + universal patterns from cycle 1`
 
@@ -1069,6 +1089,8 @@ Per the rewritten add_mcp.md from Phase 8.
 ### Phase 11: Migration documentation (v1.0.x)
 
 **Files (kit, all created):**
+**Status:** Partially done. `docs/migration/skills-mcp.md`, `docs/migration/vorrent.md`, and `docs/migration/from-mark3labs.md` now capture completed migration experience. `docs/migration/new-server.md` remains pending until Meridian Phase 9 produces real greenfield adoption evidence.
+
 - `mcp-kit/docs/migration/skills-mcp.md` — captures Phase 6 actually-executed steps + gotchas
 - `mcp-kit/docs/migration/vorrent.md` — captures Phase 7
 - `mcp-kit/docs/migration/new-server.md` — generic guide based on meridian Phase 9
@@ -1138,7 +1160,7 @@ Allowing for review cycles, integration debugging, and 50% slack: **~6 calendar 
 | Risk | Mitigation |
 |---|---|
 | Kit API needs breaking changes during Phase 6 (skills-mcp migration) | Tag pre-release versions (`v0.2.0-rc.1`); only tag `v0.2.0` after Phase 5 example server passes runbook. Kit is pre-1.0 until Phase 9 — breaks tolerated. |
-| skills-mcp's mark3labs → official SDK migration introduces tool-shape drift | Run `verify-mcp-clients` against both legacy and kit-backed binaries during Phase 6.4 cutover. Don't delete legacy until parity confirmed. |
+| skills-mcp's mark3labs → official SDK migration introduces tool-shape drift | Run `verify-mcp-clients` against the kit-backed binary after each migrated tool family and compare `tools/list` captures from git-recorded baseline evidence. Do not keep a runtime compatibility path. |
 | Vorrent's cycle 2 surfaces a bug in the kit | Phase 7 includes cycle 2 dispatch runbook execution; any bug is fixed in the kit and re-validated before Phase 7 closes. |
 | Meridian's healthcare sensitivity surfaces requirements not in the kit | Phase 9 may require kit changes (e.g. tighter audit hooks, mandatory IP allowlist mode). Kit is pre-1.0 through Phase 8 — breaks still tolerated. |
 | Ent regen produces non-empty migration diff in Phase 6.3 / 7 | Compare DDL pre/post mixin migration. If diff is non-empty, mixins are wrong; fix kit before consumer. |
@@ -1153,7 +1175,7 @@ Every phase has a clean rollback path:
 | Phase | Rollback |
 |---|---|
 | 1–5 (kit-only) | Revert tag; the kit doesn't ship yet, no consumer is affected |
-| 6 (skills-mcp migration) | Revert the cutover commit; legacy `/mcp` was kept until 6.6 explicitly removed it |
+| 6 (skills-mcp migration) | Revert the migration commits from git history; do not keep a runtime compatibility route |
 | 7 (vorrent migration) | Revert the migration commit; vorrent's `internal/oauth/` and `internal/mcpserver/` files exist in git history |
 | 8 (meridian plan rewrite) | Restore from git; no code changes |
 | 9 (meridian implementation) | Disable `MCPEnabled` config flag (default off in prod per the plan) |
@@ -1208,7 +1230,7 @@ Per `~/.claude/CLAUDE.md` Completion Checklist + MCP-specific:
 - [ ] **All problems fixed** — no broken state in any consumer; cycle 2 real-client gates closed for all three.
 - [ ] **Consistent** — kit follows official SDK conventions; consumers consume kit identically through `kitwiring/` adapter pattern.
 - [ ] **Simple** — no abstractions for hypothetical fourth consumer; storage interface only because two consumers were already on Ent.
-- [ ] **Named well** — public API names are stable (`mcpkit.New`, `oauth.New`, `oidc.RegisterRoutes`); no `MgrV2Final` or similar.
+- [ ] **Named well** — public API names are stable (`mcpkit.New`, `oauth.New`, `oidc.DiscoveryConfig.RegisterRoutes`); no `MgrV2Final` or similar.
 - [ ] **No hacks** — no `MCPGODEBUG=jsonescaping=1` anywhere; FP-01 disproof recipe passes against all three consumers.
 - [ ] **Documented** — DESIGN.md current, migration docs reflect actual experience, skills updated, README's status table accurate.
 - [ ] **System working** — three consumers in production (or staging-ready) on `mcp-kit@v1.0.0`. Inspector + Claude Code connect to all three.
@@ -1278,7 +1300,7 @@ cd /Users/timhaak/Dev/HaakCo/AiProjects/skills/apps/skills-mcp
 unset GOROOT
 go build ./...
 go test ./... -count=1
-just verify-mcp-clients http://127.0.0.1:8892        # client contract
+just verify-mcp-clients http://localhost:8892        # client contract
 git diff --stat main...HEAD                           # LOC delta check
 grep -c "mark3labs/mcp-go" go.mod || echo "removed"   # confirm SDK swap
 ```
