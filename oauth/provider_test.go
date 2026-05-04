@@ -400,6 +400,7 @@ func TestRefreshTokenRotation(t *testing.T) {
 
 	code := authorizeCode(t, server, "test-code-verifier-1234567890-must-be-at-least-43-characters-long", "state-123456")
 	tokenResponse := exchangeCode(t, server, code, "test-code-verifier-1234567890-must-be-at-least-43-characters-long")
+	defer func() { _ = tokenResponse.Body.Close() }()
 	refreshToken := decodeTokenField(t, tokenResponse, "refresh_token")
 
 	rotated := refreshTokenRequest(t, server.URL, refreshToken)

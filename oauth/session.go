@@ -13,17 +13,26 @@ type Subject struct {
 	ID            string
 	Email         string
 	GrantedScopes []string
+
+	// Extra carries consumer-specific session data. Values are copied into
+	// OIDC token claims as-is, so callers should use JSON-serializable values.
+	Extra map[string]any
 }
 
 // NewSession creates an OIDC session for subject.
 func NewSession(subject Subject) *openid.DefaultSession {
+	extra := map[string]any{
+		"email": subject.Email,
+	}
+	for key, value := range subject.Extra {
+		extra[key] = value
+	}
+
 	return &openid.DefaultSession{
 		Claims: &jwt.IDTokenClaims{
 			Subject:     subject.ID,
 			RequestedAt: time.Now().UTC(),
-			Extra: map[string]any{
-				"email": subject.Email,
-			},
+			Extra:       extra,
 		},
 		Headers:   &jwt.Headers{},
 		Subject:   subject.ID,
