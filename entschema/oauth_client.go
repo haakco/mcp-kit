@@ -37,6 +37,9 @@ func (OAuthClient) Fields() []ent.Field {
 			Default("").
 			MaxLen(1000).
 			Comment("Space-separated allowed scopes"),
+		field.JSON("audience", []string{}).
+			Default([]string{}).
+			Comment("Allowed OAuth resource indicators / audiences"),
 		field.Bool("is_public").
 			Default(false).
 			Comment("True for public clients"),

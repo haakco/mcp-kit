@@ -9,6 +9,8 @@ The module is pre-1.0. Breaking API changes are allowed between minor versions a
 ### Added
 
 - `docs/recipes/admin-gate.md` — pattern doc for enforcing admin-only mutations consistently across HTTP API + MCP surfaces. Sourced from skills-mcp Phase 1.5 / Phase 1 validation findings (privilege-escalation bug in the MCP `update_skill` tool path).
+- `docs/migration/skills-mcp.md` and plan status updates now record the completed `skills-mcp` donor migration onto kit-owned OAuth/MCP wiring.
+- `entschema.OAuthClient` now includes an `audience` JSON field so Ent-backed consumers persist the kit `storage.Client.Audience` contract used by default MCP resource indicators.
 - `docs/lessons.md` — added `AG-*` (authz gotchas) and `CG-*` (code-quality gotchas) sections:
   - `AG-01` — cross-surface admin gates must live in the service layer or every handler must enforce.
   - `AG-02` — list/count parity for visibility-filtered endpoints (or pagination totals leak existence).
@@ -18,7 +20,9 @@ The module is pre-1.0. Breaking API changes are allowed between minor versions a
   - `CG-02` — methods-per-receiver caps catch god-classes early; prefer composition when the cap fires.
   - `CG-03` — atomic commit etiquette for pre-existing test fixes during feature work.
 
-These are documentation-only changes. No code or interface surface affected.
+### Fixed
+
+- Ent-backed dynamic OAuth clients can now whitelist and round-trip the default MCP audience needed by PKCE authorization.
 
 ## v0.1.0 - 2026-05-01
 

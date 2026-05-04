@@ -1,9 +1,11 @@
 # mcp-kit Master Implementation Plan
 
-**Status:** Draft. Created 2026-05-01. v0.1.0 spike landed in commit `5aedbba`.
+**Status:** Phases 1-8 and 10 complete; phases 9, 11, and 12 still open. Created 2026-05-01. v0.1.0 spike landed in commit `5aedbba`.
 **Goal:** Take `mcp-kit` from v0.1.0 skeleton to v1.0.0 stable, with three Go consumers (skills-mcp, vorrent, meridian) all building and shipping against it; capture the universal MCP-server methodology in shared HaakCo skills so non-Go servers (Laravel) reuse the patterns.
 
 **Background:** HaakCo today has three Go services that need or already run MCP servers (`vorrent`, `skills-mcp`, `meridian`). Each shipped or planned its own ~3000 lines of OAuth + middleware + discovery + key rotation, with two of the three diverging in security posture (vorrent has no key rotation; skills-mcp has no JSON-RPC envelope rewriter). Without a shared library, each new server in any future Go project repeats the work and the implementations drift further. This plan extracts the cross-cutting concerns into a reusable library at `github.com/haakco/mcp-kit`, migrates the three servers, and shipss v1.0.0 with a battle-tested API surface.
+
+**2026-05-02 validation note:** skills-mcp's Playwright MCP browser gate exposed that Ent-backed dynamic clients must persist `storage.Client.Audience`; `entschema.OAuthClient` now includes an `audience` JSON field and skills-mcp verifies loopback authorization-code redirects against that contract.
 
 **Architecture:** Single Go module at `github.com/haakco/mcp-kit` providing OAuth 2.1 + PKCE server, signing-key rotator with grace window, JSON-RPC envelope rewriter, Origin allowlist, OIDC/OAuth discovery endpoints, JWKS endpoint, Personal Access Token validator, CLI auth helper, and Ent schema mixins. Consumers implement three small interfaces (`UserStore`, `AuditEmitter`, `AuthzService`) wrapping their existing tables; the kit returns `http.Handler`s that consumers mount in any HTTP framework (stdlib mux, Echo, Chi, Gin). Universal MCP patterns (cycle methodology, tool naming, lessons-learned IDs) live in shared skills so HaakCo's Laravel-based MCP work reuses them.
 
@@ -213,6 +215,8 @@ Twelve phases. v0.1.0 (skeleton) is complete. Remaining phases ship as v0.2.0 �
 
 ### Phase 2: v0.1.0 release + cycle docs port
 
+**Status:** Complete. Tagged `v0.1.0` at `5355bae docs: port MCP cycle methodology`.
+
 **Files (kit):**
 - Create: `mcp-kit/CHANGELOG.md` — initial release notes
 - Create: `mcp-kit/docs/cycle-methodology.md` — port from `vorrent/docs/plans/mcp/cycle_reset.md` + `dispatch_runbook.md` outline
@@ -239,6 +243,8 @@ Twelve phases. v0.1.0 (skeleton) is complete. Remaining phases ship as v0.2.0 �
 ---
 
 ### Phase 3: OAuth core extraction (v0.2.0-pre)
+
+**Status:** Complete. Tagged `v0.2.0` at `4185323 feat(examples): add minimal MCP server`.
 
 **Files (kit, all created):**
 - `mcp-kit/oauth/config.go` — `Config` struct, defaults
@@ -574,6 +580,8 @@ Expected: smoke.sh prints `PASS` for all phases.
 
 ### Phase 4: CLI auth helper (v0.2.0)
 
+**Status:** Complete. Tagged `v0.2.1` at `e8c762b feat(cliauth): browser-based PKCE login flow`.
+
 **Files (kit, all created):**
 - `mcp-kit/cliauth/pkce.go` — PKCE pair gen (already mostly in `oauth/pkce.go`; CLI-specific helpers here)
 - `mcp-kit/cliauth/browser.go` — Open system browser
@@ -605,6 +613,8 @@ Expected: smoke.sh prints `PASS` for all phases.
 
 ### Phase 5: Test kit (v0.2.1)
 
+**Status:** Complete. Tagged `v0.3.0-rc1` at `338dbf4 feat(testkit): add MCP client smoke helpers`; final Phase 5 fixes landed through `2bc9c4b fix(oauth): allow optional bearer audience checks`.
+
 **Files (kit, all created):**
 - `mcp-kit/testkit/server.go` — `NewServer(t)` spins up an in-memory mcp-kit server with a fake user store + discard audit
 - `mcp-kit/testkit/token.go` — `MintToken(t, scopes...)` issues a test bearer token without going through the OAuth flow
@@ -628,6 +638,8 @@ Expected: smoke.sh prints `PASS` for all phases.
 ---
 
 ### Phase 6: Migrate skills-mcp to kit (v0.3.0 gate)
+
+**Status:** Complete for code cutover and local gates. Kit tagged `v0.3.0` at `6653fc5 chore: satisfy full kit lint gates`; skills-mcp migration evidence is tracked in `/Users/timhaak/Dev/HaakCo/AiProjects/skills/docs/plans/2026-05-01_mcp-kit_adoption_plan.md`.
 
 **Repo:** `/Users/timhaak/Dev/HaakCo/AiProjects/skills/apps/skills-mcp/`
 

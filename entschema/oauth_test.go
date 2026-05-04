@@ -20,6 +20,7 @@ func TestOAuthClientMixinFieldsAndIndexes(t *testing.T) {
 		"grant_types",
 		"response_types",
 		"scopes",
+		"audience",
 		"is_public",
 		"name",
 		"workspace_id",
