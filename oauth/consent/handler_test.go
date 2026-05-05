@@ -215,6 +215,59 @@ func TestHandlerConsentPolicyAllowsSkip(t *testing.T) {
 	}
 }
 
+// TestHandler_CompleteApprove_PublicWrapper exercises the public
+// CompleteApprove entry point used by session-bridging callers (e.g.,
+// skills-mcp's SPA bridge for the AllowsSkip path). The bridge owns
+// authentication and policy decisions; once it has a validated requester
+// and an authenticated subject, CompleteApprove must finalize the flow:
+// re-validate scopes, mint the authorize response, emit a single
+// ConsentApproved audit event, and write the redirect.
+func TestHandler_CompleteApprove_PublicWrapper(t *testing.T) {
+	renderer := &capturingRenderer{}
+	emitter := &recordingEmitter{}
+	handler := newTestHandler(t, testHandlerConfig{
+		renderer:     renderer,
+		auditEmitter: emitter,
+	})
+
+	store := storage.NewMemoryStore()
+	registerTestClient(t, store)
+	provider := testProvider(t, store)
+
+	form := authorizeValues()
+	authReq := httptest.NewRequest(http.MethodGet, "/oauth/authorize?"+form.Encode(), nil)
+	requester, err := provider.OAuth2Provider().NewAuthorizeRequest(authReq.Context(), authReq)
+	if err != nil {
+		t.Fatalf("NewAuthorizeRequest() error = %v", err)
+	}
+	subject := oauth.Subject{ID: uuid.NewString(), Email: "alice@example.com"}
+
+	rec := httptest.NewRecorder()
+	handler.CompleteApprove(rec, authReq, requester, form, subject)
+
+	if rec.Code != http.StatusFound {
+		t.Fatalf("status = %d, want 302", rec.Code)
+	}
+	if loc := rec.Header().Get("Location"); loc == "" || !strings.Contains(loc, "code=") {
+		t.Fatalf("missing or codeless redirect Location: %q", loc)
+	}
+	if renderer.seen(consent.PageConsent) {
+		t.Error("PageConsent rendered; CompleteApprove must skip the consent page")
+	}
+	if !emitter.hasAction(string(consent.ActionConsentApproved)) {
+		t.Errorf("expected ConsentApproved audit event, got actions=%v", emitter.events)
+	}
+	approvals := 0
+	for _, ev := range emitter.events {
+		if ev.Action == string(consent.ActionConsentApproved) {
+			approvals++
+		}
+	}
+	if approvals != 1 {
+		t.Errorf("approvals = %d, want exactly 1 (no double-emit)", approvals)
+	}
+}
+
 type testHandlerConfig struct {
 	renderer      *capturingRenderer
 	authenticator consent.Authenticator

@@ -137,6 +137,23 @@ func (h *Handler) handleApprove(w http.ResponseWriter, r *http.Request, requeste
 	h.completeApprove(w, r, requester, cleanParams, subject)
 }
 
+// CompleteApprove finalizes an OAuth authorize flow whose consent decision
+// has already been made out-of-band (e.g., a session-bridging middleware
+// confirmed the user previously approved this client+scopes combination
+// via ConsentPolicy.AllowsSkip). It re-validates scopes, grants them, mints
+// the authorize response, emits a single ActionConsentApproved audit event,
+// and writes the redirect — the same path the internal POST "approve" flow
+// takes after consuming an approval token.
+//
+// Use only when (1) the request has been validated via Provider.NewAuthorizeRequest,
+// (2) subject is authenticated, and (3) the caller has already confirmed
+// AllowsSkip. The normal click-through "Approve" flow does NOT call this —
+// the handler's POST path consumes the approval token and routes through
+// the internal completion automatically.
+func (h *Handler) CompleteApprove(w http.ResponseWriter, r *http.Request, requester fosite.AuthorizeRequester, cleanParams url.Values, subject oauth.Subject) {
+	h.completeApprove(w, r, requester, cleanParams, subject)
+}
+
 func (h *Handler) completeApprove(w http.ResponseWriter, r *http.Request, requester fosite.AuthorizeRequester, cleanParams url.Values, subject oauth.Subject) {
 	requestedScopes := ArgumentsToStrings(requester.GetRequestedScopes())
 	if err := h.cfg.ConsentPolicy.ValidateScopes(r.Context(), subject, requestedScopes); err != nil {
