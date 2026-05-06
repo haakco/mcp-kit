@@ -147,6 +147,10 @@ func (h *RegistrationHandler) process(r *http.Request, req registrationRequest) 
 	if err != nil {
 		return nil, http.StatusBadRequest, "invalid_client_metadata", err.Error()
 	}
+	logoURI := strings.TrimSpace(req.LogoURI)
+	if err := validateLogoURI(logoURI); err != nil {
+		return nil, http.StatusBadRequest, "invalid_client_metadata", err.Error()
+	}
 
 	clientName := strings.TrimSpace(req.ClientName)
 	if clientName == "" {
@@ -181,6 +185,7 @@ func (h *RegistrationHandler) process(r *http.Request, req registrationRequest) 
 		Audience:         []string{h.audience},
 		IsPublic:         isPublic,
 		TokenAuthMethod:  authMethod,
+		LogoURI:          logoURI,
 	}
 	if err := h.store.SaveClient(r.Context(), client); err != nil {
 		slog.Error("persist oauth client", "error", err, "client_id", clientID)
@@ -197,6 +202,9 @@ func (h *RegistrationHandler) process(r *http.Request, req registrationRequest) 
 		TokenEndpointAuthMethod: authMethod,
 		Scope:                   scopeString,
 	}
+	if logoURI != "" {
+		resp.LogoURI = logoURI
+	}
 	if rawSecret != "" {
 		resp.ClientSecret = rawSecret
 		resp.ClientSecretExpiresAt = 0
@@ -211,6 +219,7 @@ type registrationRequest struct {
 	ResponseTypes           []string `json:"response_types"`
 	TokenEndpointAuthMethod string   `json:"token_endpoint_auth_method"`
 	Scope                   string   `json:"scope"`
+	LogoURI                 string   `json:"logo_uri"`
 }
 
 type registrationResponse struct {
@@ -224,6 +233,7 @@ type registrationResponse struct {
 	ResponseTypes           []string `json:"response_types"`
 	TokenEndpointAuthMethod string   `json:"token_endpoint_auth_method"`
 	Scope                   string   `json:"scope,omitempty"`
+	LogoURI                 string   `json:"logo_uri,omitempty"`
 }
 
 func (h *RegistrationHandler) normalizeGrantTypes(requested []string) ([]string, int, string, string) {
@@ -327,6 +337,27 @@ func validateRedirectURI(raw string) error {
 		return fmt.Errorf("redirect_uri %q: scheme %q is not supported", raw, parsed.Scheme)
 	}
 	return fmt.Errorf("redirect_uri %q: http is only allowed for loopback hosts", raw)
+}
+
+func validateLogoURI(raw string) error {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return nil
+	}
+	if len(raw) > 2048 {
+		return fmt.Errorf("logo_uri exceeds 2048 characters")
+	}
+	parsed, err := url.Parse(raw)
+	if err != nil {
+		return fmt.Errorf("logo_uri %q: %w", raw, err)
+	}
+	if parsed.Scheme != "https" || parsed.Host == "" {
+		return fmt.Errorf("logo_uri must be an absolute https URL")
+	}
+	if parsed.User != nil || parsed.Fragment != "" {
+		return fmt.Errorf("logo_uri must not include user info or fragment")
+	}
+	return nil
 }
 
 func isLoopbackHost(host string) bool {

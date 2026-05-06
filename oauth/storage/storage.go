@@ -48,6 +48,7 @@ type Client struct {
 	IsPublic         bool
 	ClientSecretHash string
 	TokenAuthMethod  string
+	LogoURI          string
 }
 
 // Session stores the serializable Fosite request state.

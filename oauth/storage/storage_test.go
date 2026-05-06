@@ -34,6 +34,27 @@ func TestStorageClientAssertionJWTFailsClosed(t *testing.T) {
 	}
 }
 
+func TestMemoryStoreClientLogoURIRoundtrip(t *testing.T) {
+	memory := storage.NewMemoryStore()
+
+	if err := memory.SaveClient(t.Context(), storage.Client{
+		ID:       "logo-client",
+		Name:     "Logo Client",
+		LogoURI:  "https://assets.example.test/logo.png",
+		IsPublic: true,
+	}); err != nil {
+		t.Fatalf("SaveClient() error = %v", err)
+	}
+
+	client, err := memory.GetClient(t.Context(), "logo-client")
+	if err != nil {
+		t.Fatalf("GetClient() error = %v", err)
+	}
+	if client.LogoURI != "https://assets.example.test/logo.png" {
+		t.Fatalf("LogoURI = %q, want saved logo", client.LogoURI)
+	}
+}
+
 func TestStorageAuthCodeRoundtrip(t *testing.T) {
 	store := newTestStorage(t)
 	requester := newRequester("auth-request", "auth-subject", "openid", "skills.read")
