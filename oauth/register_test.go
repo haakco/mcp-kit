@@ -56,6 +56,7 @@ func TestRegistrationHandlerRejectsInvalidLogoURI(t *testing.T) {
 		logoURI string
 	}{
 		{name: "non https", logoURI: "http://assets.example.test/inspector.png"},
+		{name: "empty host with port", logoURI: "https://:443/logo.png"},
 		{name: "too long", logoURI: "https://assets.example.test/" + strings.Repeat("a", 2049)},
 	}
 

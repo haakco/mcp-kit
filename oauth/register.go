@@ -351,7 +351,7 @@ func validateLogoURI(raw string) error {
 	if err != nil {
 		return fmt.Errorf("logo_uri %q: %w", raw, err)
 	}
-	if parsed.Scheme != "https" || parsed.Host == "" {
+	if parsed.Scheme != "https" || parsed.Hostname() == "" {
 		return fmt.Errorf("logo_uri must be an absolute https URL")
 	}
 	if parsed.User != nil || parsed.Fragment != "" {
