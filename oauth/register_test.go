@@ -50,6 +50,43 @@ func TestRegistrationHandlerAcceptsLogoURI(t *testing.T) {
 	}
 }
 
+func TestRegistrationHandlerOmitsLogoURIWhenAbsent(t *testing.T) {
+	store := &capturingRegistrar{}
+	handler := oauth.NewRegistrationHandler(oauth.RegistrationConfig{
+		Store:                          store,
+		AllowedScopes:                  []string{"openid", "mcp.read"},
+		DefaultScopes:                  []string{"openid", "mcp.read"},
+		Audience:                       "https://mcp.example.test/mcp",
+		DefaultTokenEndpointAuthMethod: "none",
+		DefaultGrantTypes:              []string{"authorization_code", "refresh_token"},
+		DefaultResponseTypes:           []string{"code"},
+		ClientIDPrefix:                 "mcp-",
+	})
+
+	response := postRegistration(t, handler, `{
+		"client_name":"Inspector",
+		"redirect_uris":["http://127.0.0.1:9999/callback"],
+		"grant_types":["authorization_code","refresh_token"],
+		"response_types":["code"],
+		"token_endpoint_auth_method":"none",
+		"scope":"openid mcp.read"
+	}`)
+
+	if response.Code != http.StatusCreated {
+		t.Fatalf("status = %d, want 201; body=%s", response.Code, response.Body.String())
+	}
+	var payload map[string]any
+	if err := json.NewDecoder(response.Body).Decode(&payload); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if _, ok := payload["logo_uri"]; ok {
+		t.Fatalf("response includes logo_uri when omitted: %#v", payload)
+	}
+	if got := store.client.LogoURI; got != "" {
+		t.Fatalf("stored LogoURI = %q, want empty", got)
+	}
+}
+
 func TestRegistrationHandlerRejectsInvalidLogoURI(t *testing.T) {
 	tests := []struct {
 		name    string
@@ -57,6 +94,8 @@ func TestRegistrationHandlerRejectsInvalidLogoURI(t *testing.T) {
 	}{
 		{name: "non https", logoURI: "http://assets.example.test/inspector.png"},
 		{name: "empty host with port", logoURI: "https://:443/logo.png"},
+		{name: "user info", logoURI: "https://user:pass@assets.example.test/inspector.png"},
+		{name: "fragment", logoURI: "https://assets.example.test/inspector.png#preview"},
 		{name: "too long", logoURI: "https://assets.example.test/" + strings.Repeat("a", 2049)},
 	}
 
