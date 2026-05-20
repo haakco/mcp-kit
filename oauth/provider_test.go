@@ -163,6 +163,36 @@ func TestRegisterPublicClient(t *testing.T) {
 	}
 }
 
+func TestRegisterPublicClientIgnoresUnknownMetadata(t *testing.T) {
+	store := storage.NewMemoryStore()
+	provider := newTestProvider(t, store)
+
+	request := httptest.NewRequest(http.MethodPost, "/oauth/register", strings.NewReader(`{
+		"client_name":"Inspector",
+		"redirect_uris":["http://127.0.0.1:9999/callback"],
+		"grant_types":["authorization_code","refresh_token"],
+		"response_types":["code"],
+		"token_endpoint_auth_method":"none",
+		"scope":"openid mcp.read",
+		"client_uri":"http://localhost:6274",
+		"contacts":["dev@example.com"],
+		"software_id":"mcp-inspector",
+		"software_version":"1.0.0",
+		"application_type":"native"
+	}`))
+	request.Header.Set("Content-Type", "application/json")
+	response := httptest.NewRecorder()
+
+	provider.RegisterHandler().ServeHTTP(response, request)
+
+	if response.Code != http.StatusCreated {
+		t.Fatalf("status = %d, want 201; body=%s", response.Code, response.Body.String())
+	}
+	if strings.Contains(response.Body.String(), "client_uri") {
+		t.Fatalf("registration response leaked unsupported metadata: %s", response.Body.String())
+	}
+}
+
 func TestRegisterDefaultsOmittedScopeToProviderDefaultScopes(t *testing.T) {
 	store := storage.NewMemoryStore()
 	provider := newTestProvider(t, store)

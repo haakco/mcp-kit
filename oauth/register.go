@@ -100,7 +100,6 @@ func (h *RegistrationHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) 
 
 	var req registrationRequest
 	decoder := json.NewDecoder(r.Body)
-	decoder.DisallowUnknownFields()
 	if err := decoder.Decode(&req); err != nil {
 		writeRegistrationError(w, http.StatusBadRequest, "invalid_client_metadata", "request body is not valid JSON")
 		return

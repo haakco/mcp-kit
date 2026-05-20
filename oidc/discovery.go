@@ -109,7 +109,9 @@ func (d DiscoveryConfig) RegisterRoutes(mux *http.ServeMux, cfg RouteConfig) {
 	}
 	mux.Handle("/.well-known/openid-configuration", d.OpenIDConfigurationHandler())
 	mux.Handle("/.well-known/oauth-authorization-server", d.AuthorizationServerHandler())
-	mux.Handle("/.well-known/oauth-protected-resource", d.ProtectedResourceHandler(resourceURL))
+	protectedResourceHandler := d.ProtectedResourceHandler(resourceURL)
+	mux.Handle("/.well-known/oauth-protected-resource", protectedResourceHandler)
+	mux.Handle("/.well-known/oauth-protected-resource/mcp", protectedResourceHandler)
 	if cfg.JWKS != nil {
 		mux.Handle("/.well-known/jwks.json", cfg.JWKS)
 	}
