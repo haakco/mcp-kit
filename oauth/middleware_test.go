@@ -68,6 +68,7 @@ func TestBearerRejects401WithWWWAuthenticate(t *testing.T) {
 	middleware := oauth.Bearer(oauth.BearerConfig{
 		Introspector:        &mockIntrospector{validTokens: map[string]*fosite.AccessRequest{}},
 		ResourceMetadataURL: "https://mcp.example.test/.well-known/oauth-protected-resource",
+		RequiredScopes:      []string{"openid", "mcp.read", "mcp.write"},
 	})
 
 	handler := middleware(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {
@@ -86,6 +87,37 @@ func TestBearerRejects401WithWWWAuthenticate(t *testing.T) {
 	}
 	if !strings.Contains(authHeader, "resource_metadata=") {
 		t.Fatalf("WWW-Authenticate = %q, want resource metadata URL", authHeader)
+	}
+	if !strings.Contains(authHeader, `scope="openid mcp.read mcp.write"`) {
+		t.Fatalf("WWW-Authenticate = %q, want scope hint", authHeader)
+	}
+}
+
+func TestBearerInvalidTokenChallengeIncludesScopeHint(t *testing.T) {
+	middleware := oauth.Bearer(oauth.BearerConfig{
+		Introspector:        &mockIntrospector{validTokens: map[string]*fosite.AccessRequest{}},
+		ResourceMetadataURL: "https://mcp.example.test/.well-known/oauth-protected-resource",
+		RequiredScopes:      []string{"mcp.read", "mcp.write"},
+	})
+
+	handler := middleware(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {
+		t.Fatal("handler was called with an invalid bearer token")
+	}))
+
+	request := httptest.NewRequest(http.MethodPost, "/mcp", nil)
+	request.Header.Set("Authorization", "Bearer stale-token")
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+
+	if response.Code != http.StatusUnauthorized {
+		t.Fatalf("status = %d, want 401", response.Code)
+	}
+	authHeader := response.Header().Get("WWW-Authenticate")
+	if !strings.Contains(authHeader, "resource_metadata=") {
+		t.Fatalf("WWW-Authenticate = %q, want resource metadata URL", authHeader)
+	}
+	if !strings.Contains(authHeader, `scope="mcp.read mcp.write"`) {
+		t.Fatalf("WWW-Authenticate = %q, want scope hint", authHeader)
 	}
 }
 

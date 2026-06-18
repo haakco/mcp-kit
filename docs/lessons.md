@@ -130,6 +130,14 @@ Deleting `+` or `/` silently changes the verifier bytes and can cause confusing 
 
 Authorization requests should include a state value at least eight characters long. Missing or short state can fail before scope validation runs.
 
+### OG-06 - Bearer challenges should include discovery and scope hints
+
+MCP clients recover best when every `/mcp` 401 challenge includes both `resource_metadata` and the required scope list. Do not only include scope hints on no-token requests; stale or invalid bearer tokens need the same hint so clients can prompt for the correct login flow instead of surfacing a generic auth failure.
+
+### OG-07 - CLI-friendly defaults need refresh rotation plus a useful access TTL
+
+Short access tokens are correct, but one-hour defaults are noisy for CLI MCP clients that may not refresh until the next tool call. Use a 24-hour access-token default, matching Linear's published user OAuth lifetime, and rely on refresh-token rotation for longer sessions. Keep refresh lifetimes overrideable per consumer.
+
 ## JSON-RPC Envelope Traps
 
 ### JR-01 - Echo request IDs exactly

@@ -13,6 +13,7 @@ import (
 func TestProtectedResourceMetadataHandler(t *testing.T) {
 	handler := oauth.ProtectedResourceMetadataHandler(oauth.ProtectedResourceMetadataConfig{
 		Resource:             "https://vorrent.example.test/mcp",
+		ResourceName:         "Vorrent MCP",
 		AuthorizationServers: []string{"https://vorrent.example.test"},
 		ScopesSupported:      []string{"mcp.read", "mcp.write", "offline_access"},
 	})
@@ -25,6 +26,7 @@ func TestProtectedResourceMetadataHandler(t *testing.T) {
 	}
 	var body struct {
 		Resource               string   `json:"resource"`
+		ResourceName           string   `json:"resource_name"`
 		AuthorizationServers   []string `json:"authorization_servers"`
 		BearerMethodsSupported []string `json:"bearer_methods_supported"`
 		ScopesSupported        []string `json:"scopes_supported"`
@@ -34,6 +36,9 @@ func TestProtectedResourceMetadataHandler(t *testing.T) {
 	}
 	if body.Resource != "https://vorrent.example.test/mcp" {
 		t.Fatalf("resource = %q", body.Resource)
+	}
+	if body.ResourceName != "Vorrent MCP" {
+		t.Fatalf("resource_name = %q", body.ResourceName)
 	}
 	if !slices.Equal(body.AuthorizationServers, []string{"https://vorrent.example.test"}) {
 		t.Fatalf("authorization_servers = %#v", body.AuthorizationServers)

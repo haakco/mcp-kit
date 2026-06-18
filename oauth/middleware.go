@@ -41,6 +41,7 @@ type BearerConfig struct {
 	Introspector         TokenIntrospector
 	SessionFactory       func() fosite.Session
 	ResourceMetadataURL  string
+	RequiredScopes       []string
 	TokenValidator       TokenValidator
 	Now                  func() time.Time
 	RecordUsageTimeout   time.Duration
@@ -64,6 +65,7 @@ func Bearer(cfg BearerConfig) func(http.Handler) http.Handler {
 		cfg.MaxUsageRecorders = 32
 	}
 	usageLimiter := make(chan struct{}, cfg.MaxUsageRecorders)
+	scopeHint := challengeScopeHint(cfg.RequiredScopes)
 
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -74,7 +76,7 @@ func Bearer(cfg BearerConfig) func(http.Handler) http.Handler {
 
 			token := extractBearerToken(r)
 			if token == "" {
-				writeBearerChallenge(w, cfg.ResourceMetadataURL, "", http.StatusUnauthorized)
+				writeBearerChallenge(w, cfg.ResourceMetadataURL, scopeHint, http.StatusUnauthorized)
 				return
 			}
 
@@ -87,20 +89,20 @@ func Bearer(cfg BearerConfig) func(http.Handler) http.Handler {
 			}
 
 			if cfg.Introspector == nil {
-				writeBearerChallenge(w, cfg.ResourceMetadataURL, "", http.StatusUnauthorized)
+				writeBearerChallenge(w, cfg.ResourceMetadataURL, scopeHint, http.StatusUnauthorized)
 				return
 			}
 			_, request, err := cfg.Introspector.IntrospectToken(r.Context(), token, fosite.AccessToken, cfg.SessionFactory())
 			if err != nil {
-				writeBearerChallenge(w, cfg.ResourceMetadataURL, "", http.StatusUnauthorized)
+				writeBearerChallenge(w, cfg.ResourceMetadataURL, scopeHint, http.StatusUnauthorized)
 				return
 			}
 			if cfg.ExpectedAudience != "" && !request.GetGrantedAudience().Has(cfg.ExpectedAudience) {
-				writeBearerChallenge(w, cfg.ResourceMetadataURL, "", http.StatusUnauthorized)
+				writeBearerChallenge(w, cfg.ResourceMetadataURL, scopeHint, http.StatusUnauthorized)
 				return
 			}
 			if expiresAt := request.GetSession().GetExpiresAt(fosite.AccessToken); !expiresAt.IsZero() && expiresAt.Before(cfg.Now()) {
-				writeBearerChallenge(w, cfg.ResourceMetadataURL, "", http.StatusUnauthorized)
+				writeBearerChallenge(w, cfg.ResourceMetadataURL, scopeHint, http.StatusUnauthorized)
 				return
 			}
 
@@ -253,7 +255,7 @@ func writeBearerChallenge(w http.ResponseWriter, resourceMetadataURL string, req
 		challenge += `, resource_metadata="` + resourceMetadataURL + `"`
 	}
 	if requiredScope != "" {
-		challenge += `, scope="` + requiredScope + `"`
+		challenge += `, scope="` + quoteAuthParam(requiredScope) + `"`
 	}
 
 	w.Header().Set("WWW-Authenticate", challenge)
@@ -265,4 +267,19 @@ func writeBearerChallenge(w http.ResponseWriter, resourceMetadataURL string, req
 		return
 	}
 	writeOAuthErrorBody(w, "invalid_token", "Bearer token required")
+}
+
+func challengeScopeHint(scopes []string) string {
+	clean := make([]string, 0, len(scopes))
+	for _, scope := range scopes {
+		if trimmed := strings.TrimSpace(scope); trimmed != "" {
+			clean = append(clean, trimmed)
+		}
+	}
+	return strings.Join(clean, " ")
+}
+
+func quoteAuthParam(value string) string {
+	replacer := strings.NewReplacer(`\`, `\\`, `"`, `\"`)
+	return replacer.Replace(value)
 }

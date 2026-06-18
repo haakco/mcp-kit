@@ -9,6 +9,7 @@ import (
 // ProtectedResourceMetadataConfig configures RFC 9728 protected resource metadata.
 type ProtectedResourceMetadataConfig struct {
 	Resource             string
+	ResourceName         string
 	AuthorizationServers []string
 	ScopesSupported      []string
 }
@@ -24,6 +25,7 @@ type AuthorizationServerMetadataConfig struct {
 
 type protectedResourceMetadata struct {
 	Resource               string   `json:"resource"`
+	ResourceName           string   `json:"resource_name,omitempty"`
 	AuthorizationServers   []string `json:"authorization_servers"`
 	BearerMethodsSupported []string `json:"bearer_methods_supported"`
 	ScopesSupported        []string `json:"scopes_supported,omitempty"`
@@ -50,6 +52,7 @@ func ProtectedResourceMetadataHandler(cfg ProtectedResourceMetadataConfig) http.
 		}
 		writeMetadataJSON(w, protectedResourceMetadata{
 			Resource:               cfg.Resource,
+			ResourceName:           cfg.ResourceName,
 			AuthorizationServers:   append([]string{}, cfg.AuthorizationServers...),
 			BearerMethodsSupported: []string{"header"},
 			ScopesSupported:        append([]string{}, cfg.ScopesSupported...),

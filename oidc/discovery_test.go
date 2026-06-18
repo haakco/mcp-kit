@@ -34,15 +34,31 @@ func TestDiscoveryAllAdvertisedScopesPresent(t *testing.T) {
 	}
 }
 
+func TestDiscoveryProtectedResourceMetadataIncludesResourceName(t *testing.T) {
+	cfg := oidc.NewDiscoveryConfig("https://auth.example.test", []string{"mcp.read"})
+	cfg.ResourceName = "HaakCo MCP"
+
+	doc := cfg.ProtectedResourceMetadata("https://auth.example.test/mcp")
+
+	if doc.ResourceName != "HaakCo MCP" {
+		t.Fatalf("resource_name = %q, want HaakCo MCP", doc.ResourceName)
+	}
+}
+
 func TestDiscoveryRegisterRoutes(t *testing.T) {
 	cfg := oidc.NewDiscoveryConfig("https://auth.example.test", []string{"mcp.read"})
 	mux := http.NewServeMux()
-	cfg.RegisterRoutes(mux, oidc.RouteConfig{ResourceURL: "https://auth.example.test/custom-mcp"})
+	cfg.RegisterRoutes(mux, oidc.RouteConfig{
+		ResourceURL:  "https://auth.example.test/custom-mcp",
+		ResourceName: "Custom MCP",
+	})
 
 	assertJSONField(t, mux, "/.well-known/oauth-authorization-server", "issuer", "https://auth.example.test")
 	assertJSONField(t, mux, "/.well-known/openid-configuration", "jwks_uri", "https://auth.example.test/.well-known/jwks.json")
 	assertJSONField(t, mux, "/.well-known/oauth-protected-resource", "resource", "https://auth.example.test/custom-mcp")
+	assertJSONField(t, mux, "/.well-known/oauth-protected-resource", "resource_name", "Custom MCP")
 	assertJSONField(t, mux, "/.well-known/oauth-protected-resource/mcp", "resource", "https://auth.example.test/custom-mcp")
+	assertJSONField(t, mux, "/.well-known/oauth-protected-resource/mcp", "resource_name", "Custom MCP")
 }
 
 func TestDiscoveryRejectsNonGET(t *testing.T) {

@@ -6,6 +6,7 @@ Active and archived implementation plans for `mcp-kit`.
 
 | Plan | Status | Goal |
 |---|---|---|
+| [2026-06-18_oauth_mcp_defaults.md](2026-06-18_oauth_mcp_defaults.md) | Implemented; consumer upgrades pending | Move reusable OAuth/MCP renewal, bearer challenge, and protected-resource metadata defaults into mcp-kit |
 | [2026-05-01_mcp-kit_master_plan.md](2026-05-01_mcp-kit_master_plan.md) | Draft (v0.1.0 spike landed; awaiting review) | Take mcp-kit from v0.1.0 skeleton to v1.0.0 stable across three Go consumers (skills-mcp, vorrent, meridian) |
 
 ## Archive

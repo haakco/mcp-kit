@@ -13,6 +13,7 @@ const signingAlgorithm = "RS256"
 // DiscoveryConfig holds values needed to build discovery documents.
 type DiscoveryConfig struct {
 	Issuer                string
+	ResourceName          string
 	AuthorizationEndpoint string
 	TokenEndpoint         string
 	JWKSEndpoint          string
@@ -24,6 +25,7 @@ type DiscoveryConfig struct {
 // ProtectedResourceMetadata is RFC 9728 protected resource metadata.
 type ProtectedResourceMetadata struct {
 	Resource               string   `json:"resource"`
+	ResourceName           string   `json:"resource_name,omitempty"`
 	AuthorizationServers   []string `json:"authorization_servers"`
 	BearerMethodsSupported []string `json:"bearer_methods_supported"`
 	ScopesSupported        []string `json:"scopes_supported,omitempty"`
@@ -31,8 +33,9 @@ type ProtectedResourceMetadata struct {
 
 // RouteConfig configures mounted discovery routes.
 type RouteConfig struct {
-	ResourceURL string
-	JWKS        http.Handler
+	ResourceURL  string
+	ResourceName string
+	JWKS         http.Handler
 }
 
 // NewDiscoveryConfig builds a discovery config from an issuer URL.
@@ -78,6 +81,7 @@ func (d DiscoveryConfig) AuthorizationServerMetadata() map[string]any {
 func (d DiscoveryConfig) ProtectedResourceMetadata(resourceURL string) ProtectedResourceMetadata {
 	return ProtectedResourceMetadata{
 		Resource:               strings.TrimRight(resourceURL, "/"),
+		ResourceName:           d.ResourceName,
 		AuthorizationServers:   []string{d.Issuer},
 		BearerMethodsSupported: []string{"header"},
 		ScopesSupported:        append([]string{}, d.ScopesSupported...),
@@ -106,6 +110,9 @@ func (d DiscoveryConfig) RegisterRoutes(mux *http.ServeMux, cfg RouteConfig) {
 	resourceURL := cfg.ResourceURL
 	if resourceURL == "" {
 		resourceURL = d.Issuer + "/mcp"
+	}
+	if cfg.ResourceName != "" {
+		d.ResourceName = cfg.ResourceName
 	}
 	mux.Handle("/.well-known/openid-configuration", d.OpenIDConfigurationHandler())
 	mux.Handle("/.well-known/oauth-authorization-server", d.AuthorizationServerHandler())

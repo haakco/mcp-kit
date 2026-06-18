@@ -10,6 +10,16 @@ import (
 	"github.com/haakco/mcp-kit/oauth/storage"
 )
 
+const (
+	// DefaultAccessTokenLifespan matches Linear's published user OAuth token
+	// lifetime, keeping CLI MCP sessions alive for a normal workday while still
+	// relying on refresh-token rotation for longer sessions.
+	DefaultAccessTokenLifespan = 24 * time.Hour
+	// DefaultRefreshTokenLifespan gives MCP clients enough time to recover from
+	// missed daily use while still forcing periodic reauthorization.
+	DefaultRefreshTokenLifespan = 30 * 24 * time.Hour
+)
+
 // Config holds settings for the OAuth/OIDC provider.
 type Config struct {
 	Secret   []byte //nolint:gosec // OAuth HMAC secret supplied by the consumer.
@@ -30,10 +40,10 @@ type Config struct {
 
 func (c *Config) applyDefaults() error {
 	if c.AccessTokenLifespan == 0 {
-		c.AccessTokenLifespan = time.Hour
+		c.AccessTokenLifespan = DefaultAccessTokenLifespan
 	}
 	if c.RefreshTokenLifespan == 0 {
-		c.RefreshTokenLifespan = 24 * time.Hour
+		c.RefreshTokenLifespan = DefaultRefreshTokenLifespan
 	}
 	if c.AuthorizeCodeLifespan == 0 {
 		c.AuthorizeCodeLifespan = 10 * time.Minute

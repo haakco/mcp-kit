@@ -8,6 +8,9 @@ The module is pre-1.0. Breaking API changes are allowed between minor versions a
 
 ### Added
 
+- `oauth.DefaultAccessTokenLifespan` and `oauth.DefaultRefreshTokenLifespan` constants, now used by `oauth.Config` defaults. Access tokens default to 24 hours to match Linear's published user OAuth lifetime; refresh tokens default to 30 days and continue to rotate on use.
+- `oauth.BearerConfig.RequiredScopes`, which adds a `scope="..."` hint to 401 bearer challenges while preserving `resource_metadata`.
+- `resource_name` support in OAuth/OIDC protected-resource metadata helpers.
 - `oauth/consent` — production-oriented authorization endpoint helper shared across Go MCP servers, with `Authenticator`, `Renderer`, `ApprovalTokenStore`, `ConsentPolicy`, and `ChallengeProvider` interfaces.
 - `oauth/consent/hmacstore` and `oauth/consent/sessionstore` — stock approval-token backends for stateless and session-backed consent flows.
 - `oauth/consent/consenttest` — fixtures for in-memory provider setup and canonical consent-handler tests.
