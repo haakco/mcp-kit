@@ -3,8 +3,10 @@ package consent
 import (
 	"context"
 	"crypto/hmac"
+	"crypto/rand"
 	"crypto/sha256"
 	"encoding/base64"
+	"fmt"
 	"net/url"
 	"strconv"
 	"strings"
@@ -28,7 +30,11 @@ func newDefaultApprovalStore(key []byte, now func() time.Time) *defaultApprovalS
 
 func (s *defaultApprovalStore) Issue(_ context.Context, subject oauth.Subject, params url.Values) (string, error) {
 	expiresAt := s.now().Add(ApprovalTokenTTL()).Unix()
-	payload := subject.ID + "|" + strconv.FormatInt(expiresAt, 10) + "|" + ParamsDigest(params)
+	nonce, err := newApprovalNonce()
+	if err != nil {
+		return "", err
+	}
+	payload := subject.ID + "|" + strconv.FormatInt(expiresAt, 10) + "|" + ParamsDigest(params) + "|" + nonce
 	signature := s.sign(payload)
 	token := base64.RawURLEncoding.EncodeToString([]byte(payload + "|" + signature))
 
@@ -47,11 +53,12 @@ func (s *defaultApprovalStore) Consume(_ context.Context, token string, params u
 		return oauth.Subject{}, ErrApprovalTokenInvalid
 	}
 	parts := strings.Split(string(decoded), "|")
-	if len(parts) != 4 {
+	if len(parts) != 4 && len(parts) != 5 {
 		return oauth.Subject{}, ErrApprovalTokenInvalid
 	}
-	payload := strings.Join(parts[:3], "|")
-	if !hmac.Equal([]byte(parts[3]), []byte(s.sign(payload))) {
+	signature := parts[len(parts)-1]
+	payload := strings.Join(parts[:len(parts)-1], "|")
+	if !hmac.Equal([]byte(signature), []byte(s.sign(payload))) {
 		return oauth.Subject{}, ErrApprovalTokenInvalid
 	}
 	expiresAt, err := strconv.ParseInt(parts[1], 10, 64)
@@ -92,4 +99,12 @@ func (s *defaultApprovalStore) sign(payload string) string {
 	mac := hmac.New(sha256.New, s.key)
 	_, _ = mac.Write([]byte(payload))
 	return base64.RawURLEncoding.EncodeToString(mac.Sum(nil))
+}
+
+func newApprovalNonce() (string, error) {
+	var buf [32]byte
+	if _, err := rand.Read(buf[:]); err != nil {
+		return "", fmt.Errorf("approval token nonce: %w", err)
+	}
+	return base64.RawURLEncoding.EncodeToString(buf[:]), nil
 }

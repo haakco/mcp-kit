@@ -32,6 +32,32 @@ func TestStoreRoundTrip(t *testing.T) {
 	}
 }
 
+func TestStoreIssuesUniqueTokensForSameRequest(t *testing.T) {
+	now := time.Date(2026, 6, 18, 21, 0, 0, 0, time.UTC)
+	store := New(mustRandKey(t), func() time.Time { return now })
+	sub := oauth.Subject{ID: uuid.NewString()}
+	params := url.Values{"client_id": {"abc"}, "state": {"xxxxxxxx"}, "scope": {"openid"}}
+
+	first, err := store.Issue(context.Background(), sub, params)
+	if err != nil {
+		t.Fatalf("first issue: %v", err)
+	}
+	second, err := store.Issue(context.Background(), sub, params)
+	if err != nil {
+		t.Fatalf("second issue: %v", err)
+	}
+	if first == second {
+		t.Fatal("Issue returned identical tokens for the same request in the same second")
+	}
+
+	if _, err := store.Consume(context.Background(), first, params); err != nil {
+		t.Fatalf("consume first token: %v", err)
+	}
+	if _, err := store.Consume(context.Background(), second, params); err != nil {
+		t.Fatalf("consume second token: %v", err)
+	}
+}
+
 func TestStoreRejectsReplay(t *testing.T) {
 	store := New(mustRandKey(t), time.Now)
 	sub := oauth.Subject{ID: uuid.NewString()}
