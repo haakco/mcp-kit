@@ -42,7 +42,7 @@ func newHandler() (http.Handler, error) {
 			Introspector:        oauthProvider.OAuth2Provider(),
 			TokenValidator:      staticTokenValidator{},
 			ResourceMetadataURL: issuerURL() + "/.well-known/oauth-protected-resource",
-			RequiredScopes:      []string{"openid", "skills.read", "skills.write"},
+			RequiredScopes:      []string{"mcp.read"},
 			ExpectedAudience:    issuerURL() + "/mcp",
 		},
 	})
@@ -62,7 +62,7 @@ func newHandler() (http.Handler, error) {
 		return oauth.Subject{
 			ID:            "example-user",
 			Email:         "example@example.com",
-			GrantedScopes: []string{"openid", "mcp.read", "skills.read", "skills.write"},
+			GrantedScopes: []string{"openid", "mcp.read"},
 		}, nil
 	})
 	mux.Handle("/mcp", mcpServer.Handler())
@@ -79,7 +79,7 @@ func newExampleOAuth() (*oauth.Provider, *keys.Manager, error) {
 		Audience:      issuerURL() + "/mcp",
 		Store:         storage.NewMemoryStore(),
 		KeyManager:    keyManager,
-		AllowedScopes: []string{"openid", "mcp.read", "skills.read", "skills.write"},
+		AllowedScopes: []string{"openid", "mcp.read"},
 	})
 	if err != nil {
 		return nil, nil, err

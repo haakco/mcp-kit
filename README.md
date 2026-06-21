@@ -42,8 +42,8 @@ func main() {
         Issuer:        "https://my-mcp.example.com",
         Store:         myapp.NewOAuthStore(db),
         KeyManager:    myapp.NewOAuthKeyManager(db),
-        AllowedScopes: []string{"mcp.read", "mcp.write", "offline_access"},
-        DefaultScopes: []string{"mcp.read", "offline_access"},
+        AllowedScopes: []string{"mcp.read", "mcp.write"},
+        DefaultScopes: []string{"mcp.read"},
     })
     if err != nil { /* handle */ }
 
@@ -59,11 +59,11 @@ func main() {
             TokenValidator:      myapp.NewPATValidator(db),
             Introspector:        oauthProv.OAuth2Provider(),
             SessionFactory:      oauth.NewEmptySession,
-            ResourceMetadataURL: "https://app.example.com/.well-known/oauth-protected-resource",
-            RequiredScopes:      []string{"openid", "skills.read", "skills.write"},
-            ExpectedAudience:    "https://app.example.com/mcp",
+            ResourceMetadataURL: "https://my-mcp.example.com/.well-known/oauth-protected-resource",
+            RequiredScopes:      []string{"mcp.read"},
+            ExpectedAudience:    "https://my-mcp.example.com/mcp",
         },
-        AllowedOrigins: []string{"https://app.example.com"},
+        AllowedOrigins: []string{"https://my-mcp.example.com"},
         AllowLoopback:  isDev,
     })
     if err != nil { /* handle */ }
@@ -84,7 +84,7 @@ func main() {
     mux.Handle("/oauth/token", oauthProv.TokenHandler())
     mux.Handle("/oauth/register", oauthProv.RegisterHandler())
 
-    discovery := oidc.NewDiscoveryConfig("https://my-mcp.example.com", []string{"mcp.read", "mcp.write", "offline_access"})
+    discovery := oidc.NewDiscoveryConfig("https://my-mcp.example.com", []string{"mcp.read", "mcp.write"})
     discovery.RegisterRoutes(mux, oidc.RouteConfig{
         ResourceURL: "https://my-mcp.example.com/mcp",
         JWKS:        oidc.JWKSHandler(myapp.NewOAuthKeyManager(db)),

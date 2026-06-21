@@ -18,7 +18,7 @@
 //	        Introspector:        oauthProv.OAuth2Provider(),
 //	        SessionFactory:      oauth.NewEmptySession,
 //	        ResourceMetadataURL: "https://app.example.com/.well-known/oauth-protected-resource",
-//	        RequiredScopes:      []string{"openid", "skills.read", "skills.write"},
+//	        RequiredScopes:      []string{"mcp.read"},
 //	        ExpectedAudience:    "https://app.example.com/mcp",
 //	    },
 //	    AllowedOrigins: []string{"https://app.example.com"},

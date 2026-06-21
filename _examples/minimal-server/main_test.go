@@ -62,4 +62,22 @@ func TestMinimalServerRejectsMissingToken(t *testing.T) {
 	if response.Code != http.StatusUnauthorized {
 		t.Fatalf("status = %d, want 401", response.Code)
 	}
+	if authHeader := response.Header().Get("WWW-Authenticate"); !strings.Contains(authHeader, `scope="mcp.read"`) {
+		t.Fatalf("WWW-Authenticate = %q, want mcp.read scope hint", authHeader)
+	}
+
+	metadata := httptest.NewRecorder()
+	handler.ServeHTTP(metadata, httptest.NewRequest(http.MethodGet, "/.well-known/oauth-protected-resource", nil))
+	if metadata.Code != http.StatusOK {
+		t.Fatalf("protected resource metadata status = %d, want 200", metadata.Code)
+	}
+	var payload struct {
+		ScopesSupported []string `json:"scopes_supported"`
+	}
+	if err := json.Unmarshal(metadata.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("decode protected resource metadata: %v", err)
+	}
+	if strings.Join(payload.ScopesSupported, " ") != "mcp.read" {
+		t.Fatalf("scopes_supported = %v, want [mcp.read]", payload.ScopesSupported)
+	}
 }
