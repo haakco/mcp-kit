@@ -15,8 +15,11 @@
 //	mcpServer, err := mcpkit.New(mcpkit.Config{
 //	    Handler: sdkHandler,
 //	    Bearer: mcpkit.BearerConfig{
-//	        Introspector:    oauthProv.OAuth2Provider(),
-//	        SessionFactory: oauth.NewEmptySession,
+//	        Introspector:        oauthProv.OAuth2Provider(),
+//	        SessionFactory:      oauth.NewEmptySession,
+//	        ResourceMetadataURL: "https://app.example.com/.well-known/oauth-protected-resource",
+//	        RequiredScopes:      []string{"openid", "skills.read", "skills.write"},
+//	        ExpectedAudience:    "https://app.example.com/mcp",
 //	    },
 //	    AllowedOrigins: []string{"https://app.example.com"},
 //	    AllowLoopback:  isDev,

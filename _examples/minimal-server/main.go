@@ -42,6 +42,7 @@ func newHandler() (http.Handler, error) {
 			Introspector:        oauthProvider.OAuth2Provider(),
 			TokenValidator:      staticTokenValidator{},
 			ResourceMetadataURL: issuerURL() + "/.well-known/oauth-protected-resource",
+			RequiredScopes:      []string{"openid", "skills.read", "skills.write"},
 			ExpectedAudience:    issuerURL() + "/mcp",
 		},
 	})
