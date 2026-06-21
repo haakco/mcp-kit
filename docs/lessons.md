@@ -136,7 +136,7 @@ MCP clients recover best when every `/mcp` 401 challenge includes `resource_meta
 
 ### OG-07 - CLI-friendly defaults need refresh rotation plus a useful access TTL
 
-Short access tokens are correct, but one-hour defaults are noisy for CLI MCP clients that may not refresh until the next tool call. Use a 24-hour access-token default, matching Linear's published user OAuth lifetime, and rely on refresh-token rotation for longer sessions. Keep refresh lifetimes overrideable per consumer.
+Short access tokens are correct for OAuth-backed Streamable HTTP MCP because some clients do not refresh/retry when the server returns `401 invalid_token`; they only refresh from locally stored expiry metadata. Use a 1-hour access-token default to reduce stale-token windows, and rely on 30-day rotating refresh tokens for longer sessions. Keep both lifetimes overrideable per consumer.
 
 ## JSON-RPC Envelope Traps
 

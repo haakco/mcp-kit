@@ -96,6 +96,12 @@ metadata, and JSON-RPC envelope behavior. Consumers must still enforce
 tool/resource permissions and audit every sensitive domain operation in their
 handlers.
 
+## OAuth Token Lifetimes
+
+By default, `oauth.Config` issues 1-hour access tokens and 30-day rotating refresh tokens. The short access-token lifetime limits the stale-token window when a client keeps sending a token that the server has already invalidated through revocation, database reset, or session cleanup.
+
+For MCP clients using OAuth-backed Streamable HTTP, the standards-based recovery signal is the `WWW-Authenticate` bearer challenge on `401 Unauthorized`. `mcp-kit` includes `resource_metadata`, `scope`, `error="invalid_token"`, and `error_description` on invalid-token challenges, and publishes protected-resource metadata with `authorization_servers`, `bearer_methods_supported=["header"]`, `resource_name`, and `scopes_supported` when configured. Some clients still only refresh proactively from their local expiry timestamp and do not refresh/retry when the server returns `401 invalid_token`; lowering the access-token lifetime reduces that stale window but does not replace client-side 401 recovery.
+
 ## Documentation
 
 - [DESIGN.md](DESIGN.md) — full design rationale, package layout, public API

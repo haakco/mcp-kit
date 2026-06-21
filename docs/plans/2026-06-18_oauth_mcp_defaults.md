@@ -2,7 +2,7 @@
 
 **Status:** Implemented; downstream consumer upgrades remain separate.
 **Goal:** Move reusable OAuth/MCP renewal and discovery fixes into `mcp-kit` so Skills, Vorrent, and future Go MCP servers do not carry app-local wrappers.
-**Background:** Skills local dev reproduced a stale-token `/mcp` challenge that preserved `resource_metadata` but omitted `scope`, causing poorer client login UX than Linear. Linear's current OAuth docs publish 24-hour user access tokens with refresh-token rotation, while `mcp-kit` still defaulted access tokens to 1 hour and refresh tokens to 24 hours.
+**Background:** Skills local dev reproduced a stale-token `/mcp` challenge that preserved `resource_metadata` but omitted `scope`, causing poorer client login UX than Linear. The original plan moved toward 24-hour access tokens, but later Codex/rmcp testing showed server-side invalidation can leave clients sending stale access tokens until their local expiry timestamp. The default is now 1-hour access tokens with 30-day rotating refresh tokens.
 **Architecture:** Keep protocol-sensitive defaults in `oauth.Config`, bearer challenge behavior in `oauth.Bearer`, and protected-resource display metadata in OAuth/OIDC discovery helpers. Consumers may still override lifetimes and scopes explicitly.
 **Tech Stack:** Go 1.26, Fosite, OAuth 2.1 draft-15, RFC 9728, MCP 2025-06-18 Streamable HTTP auth.
 **Parallel Work Model:** Single shared-library patch. Downstream Skills/Vorrent adoption is separate so each consumer can update module versions and run its own integration gates.
@@ -14,12 +14,12 @@
 Last verified: 2026-06-18
 
 **Files examined:**
-- `oauth/config.go` — default access token `1h`, refresh token `24h`.
+- `oauth/config.go` — default access token `1h`, refresh token `30d`.
 - `oauth/provider.go` — Fosite receives configured lifetimes and composes refresh-token grant plus refresh rotation.
 - `oauth/storage/storage.go` — refresh-token rotation invalidates old access and refresh token sessions.
 - `oauth/middleware.go` — bearer challenges preserve `resource_metadata` but had no reusable configured scope hint.
 - `oauth/metadata.go` and `oidc/discovery.go` — protected-resource metadata omitted RFC 9728 `resource_name`.
-- Linear OAuth docs — user OAuth access tokens are valid for 24 hours and refresh responses return both a new access token and a new refresh token.
+- Codex/rmcp stale-token testing — OAuth-backed Streamable HTTP clients may not refresh/retry after a server-side `401 invalid_token` even when refresh tokens are valid.
 
 **Key findings:**
 - The shared library is the correct owner for default lifetimes and challenge shape.
@@ -31,7 +31,7 @@ Last verified: 2026-06-18
 
 ## Tasks
 
-### Task 1: Linear-Style OAuth Defaults
+### Task 1: OAuth Token Lifespan Defaults
 
 **Files:**
 - Modify: `oauth/config.go`
@@ -39,7 +39,7 @@ Last verified: 2026-06-18
 
 **Steps:**
 1. Add failing defaults test.
-2. Export `DefaultAccessTokenLifespan = 24h`.
+2. Export `DefaultAccessTokenLifespan = 1h`.
 3. Export `DefaultRefreshTokenLifespan = 30d`.
 4. Use both in `Config.applyDefaults`.
 
