@@ -8,7 +8,7 @@ import (
 	"github.com/haakco/mcp-kit/oauth/storage"
 )
 
-func TestConfigApplyDefaultsUsesLinearStyleAccessLifetime(t *testing.T) {
+func TestConfigApplyDefaultsUsesShortAccessTokenLifetime(t *testing.T) {
 	cfg := Config{
 		Issuer:     "https://mcp.example.test",
 		Store:      storage.NewMemoryStore(),
@@ -19,8 +19,8 @@ func TestConfigApplyDefaultsUsesLinearStyleAccessLifetime(t *testing.T) {
 		t.Fatalf("applyDefaults() error = %v", err)
 	}
 
-	if cfg.AccessTokenLifespan != 24*time.Hour {
-		t.Fatalf("AccessTokenLifespan = %s, want 24h", cfg.AccessTokenLifespan)
+	if cfg.AccessTokenLifespan != time.Hour {
+		t.Fatalf("AccessTokenLifespan = %s, want 1h", cfg.AccessTokenLifespan)
 	}
 	if cfg.RefreshTokenLifespan != 30*24*time.Hour {
 		t.Fatalf("RefreshTokenLifespan = %s, want 30d", cfg.RefreshTokenLifespan)

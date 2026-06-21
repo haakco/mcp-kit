@@ -11,10 +11,9 @@ import (
 )
 
 const (
-	// DefaultAccessTokenLifespan matches Linear's published user OAuth token
-	// lifetime, keeping CLI MCP sessions alive for a normal workday while still
+	// DefaultAccessTokenLifespan keeps stale access tokens short-lived while
 	// relying on refresh-token rotation for longer sessions.
-	DefaultAccessTokenLifespan = 24 * time.Hour
+	DefaultAccessTokenLifespan = time.Hour
 	// DefaultRefreshTokenLifespan gives MCP clients enough time to recover from
 	// missed daily use while still forcing periodic reauthorization.
 	DefaultRefreshTokenLifespan = 30 * 24 * time.Hour
