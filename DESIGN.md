@@ -217,7 +217,7 @@ type Config struct {
 
     // AccessTokenLifespan defaults to 1h.
     AccessTokenLifespan time.Duration
-    // RefreshTokenLifespan defaults to 24h.
+    // RefreshTokenLifespan defaults to 30d.
     RefreshTokenLifespan time.Duration
     // AuthorizationCodeLifespan defaults to 10m.
     AuthorizationCodeLifespan time.Duration

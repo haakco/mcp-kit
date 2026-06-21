@@ -23,7 +23,7 @@ Last verified: 2026-06-18
 
 **Key findings:**
 - The shared library is the correct owner for default lifetimes and challenge shape.
-- Linear publishes access-token lifetime and rotation behavior, not a fixed refresh-token absolute lifetime. `mcp-kit` should match the 24-hour access token exactly and use a pragmatic 30-day refresh-token default with rotation.
+- Linear publishes access-token lifetime and rotation behavior, not a fixed refresh-token absolute lifetime. `mcp-kit` now uses a shorter 1-hour access token and a pragmatic 30-day refresh-token default with rotation.
 - Scope hints must be available from `oauth.BearerConfig` so consumers do not need app-local wrappers around `/mcp`.
 - `resource_name` should be available in protected-resource metadata helpers for better client display.
 
