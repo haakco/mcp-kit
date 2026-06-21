@@ -91,6 +91,12 @@ func TestBearerRejects401WithWWWAuthenticate(t *testing.T) {
 	if !strings.Contains(authHeader, `scope="openid mcp.read mcp.write"`) {
 		t.Fatalf("WWW-Authenticate = %q, want scope hint", authHeader)
 	}
+	if !strings.Contains(authHeader, `error="invalid_token"`) {
+		t.Fatalf("WWW-Authenticate = %q, want invalid_token error", authHeader)
+	}
+	if !strings.Contains(authHeader, `error_description="Missing or invalid access token"`) {
+		t.Fatalf("WWW-Authenticate = %q, want error description", authHeader)
+	}
 }
 
 func TestBearerInvalidTokenChallengeIncludesScopeHint(t *testing.T) {
@@ -118,6 +124,12 @@ func TestBearerInvalidTokenChallengeIncludesScopeHint(t *testing.T) {
 	}
 	if !strings.Contains(authHeader, `scope="mcp.read mcp.write"`) {
 		t.Fatalf("WWW-Authenticate = %q, want scope hint", authHeader)
+	}
+	if !strings.Contains(authHeader, `error="invalid_token"`) {
+		t.Fatalf("WWW-Authenticate = %q, want invalid_token error", authHeader)
+	}
+	if !strings.Contains(authHeader, `error_description="Missing or invalid access token"`) {
+		t.Fatalf("WWW-Authenticate = %q, want error description", authHeader)
 	}
 }
 

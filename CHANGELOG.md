@@ -34,6 +34,7 @@ The module is pre-1.0. Breaking API changes are allowed between minor versions a
 
 ### Fixed
 
+- Bearer challenges now include OAuth `error` and `error_description` auth-params in `WWW-Authenticate`, so clients can classify unauthenticated MCP startup as a login-required OAuth flow instead of a generic transport failure.
 - Ent-backed dynamic OAuth clients can now whitelist and round-trip the default MCP audience needed by PKCE authorization.
 
 ## v0.1.0 - 2026-05-01

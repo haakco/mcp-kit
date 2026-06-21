@@ -254,19 +254,27 @@ func writeBearerChallenge(w http.ResponseWriter, resourceMetadataURL string, req
 	if resourceMetadataURL != "" {
 		challenge += `, resource_metadata="` + resourceMetadataURL + `"`
 	}
-	if requiredScope != "" {
-		challenge += `, scope="` + quoteAuthParam(requiredScope) + `"`
-	}
 
 	w.Header().Set("WWW-Authenticate", challenge)
 	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(status)
 
 	if status == http.StatusForbidden {
+		if requiredScope != "" {
+			challenge += `, error="insufficient_scope", error_description="Requires scope: ` + quoteAuthParam(requiredScope) +
+				`", scope="` + quoteAuthParam(requiredScope) + `"`
+			w.Header().Set("WWW-Authenticate", challenge)
+		}
+		w.WriteHeader(status)
 		writeOAuthErrorBody(w, "insufficient_scope", fmt.Sprintf("requires scope: %s", requiredScope))
 		return
 	}
-	writeOAuthErrorBody(w, "invalid_token", "Bearer token required")
+	challenge += `, error="invalid_token", error_description="Missing or invalid access token"`
+	if requiredScope != "" {
+		challenge += `, scope="` + quoteAuthParam(requiredScope) + `"`
+	}
+	w.Header().Set("WWW-Authenticate", challenge)
+	w.WriteHeader(status)
+	writeOAuthErrorBody(w, "invalid_token", "Missing or invalid access token")
 }
 
 func challengeScopeHint(scopes []string) string {
