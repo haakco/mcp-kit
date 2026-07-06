@@ -250,7 +250,7 @@ func extractBearerToken(r *http.Request) string {
 }
 
 func writeBearerChallenge(w http.ResponseWriter, resourceMetadataURL string, requiredScope string, status int) {
-	challenge := `Bearer realm="mcp-kit"`
+	challenge := `Bearer realm="OAuth"`
 	if resourceMetadataURL != "" {
 		challenge += `, resource_metadata="` + resourceMetadataURL + `"`
 	}
@@ -269,9 +269,6 @@ func writeBearerChallenge(w http.ResponseWriter, resourceMetadataURL string, req
 		return
 	}
 	challenge += `, error="invalid_token", error_description="Missing or invalid access token"`
-	if requiredScope != "" {
-		challenge += `, scope="` + quoteAuthParam(requiredScope) + `"`
-	}
 	w.Header().Set("WWW-Authenticate", challenge)
 	w.WriteHeader(status)
 	writeOAuthErrorBody(w, "invalid_token", "Missing or invalid access token")

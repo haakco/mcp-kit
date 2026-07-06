@@ -9,7 +9,7 @@ The module is pre-1.0. Breaking API changes are allowed between minor versions a
 ### Added
 
 - `oauth.DefaultAccessTokenLifespan` and `oauth.DefaultRefreshTokenLifespan` constants, now used by `oauth.Config` defaults. Access tokens default to 1 hour to limit stale-token windows; refresh tokens default to 30 days and continue to rotate on use.
-- `oauth.BearerConfig.RequiredScopes`, which adds a `scope="..."` hint to 401 bearer challenges while preserving `resource_metadata`.
+- `oauth.BearerConfig.RequiredScopes`, which enforces required bearer scopes while preserving `resource_metadata` on 401 challenges and adding `scope="..."` only on 403 insufficient-scope challenges.
 - `resource_name` support in OAuth/OIDC protected-resource metadata helpers.
 - `oauth.ProtectedResourceMetadataPathFor` / `oauth.ProtectedResourceMetadataURLFor` plus `oidc` re-exports for deriving RFC 9728 path-specific protected-resource metadata URLs from the canonical MCP resource URL.
 - `oauth.AuthorizationServerMetadataConfig.Resource` and `ResourceMetadataURL`, emitted as `resource` and `resource_metadata` in OAuth authorization-server metadata when configured.
@@ -35,6 +35,7 @@ The module is pre-1.0. Breaking API changes are allowed between minor versions a
 - `Provider.AuthorizeHandler` docstring now calls out that it is demo-oriented and points production consumers to `oauth/consent`. Behavior is unchanged.
 - OIDC/OAuth discovery metadata now includes `resource`, `resource_metadata`, and `response_modes_supported=["query"]` when route registration knows the protected resource URL.
 - `oidc.DiscoveryConfig.RegisterRoutes` now mounts the RFC 9728 path-specific protected-resource metadata route derived from `RouteConfig.ResourceURL`, while keeping the root `/.well-known/oauth-protected-resource` route for compatibility.
+- Invalid-token bearer challenges now use the interoperable `Bearer realm="OAuth"` shape and omit `scope`, matching the RFC 6750 examples and keeping scope hints for `insufficient_scope`.
 
 ### Fixed
 

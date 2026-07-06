@@ -63,8 +63,8 @@ func TestMinimalServerRejectsMissingToken(t *testing.T) {
 		t.Fatalf("status = %d, want 401", response.Code)
 	}
 	authHeader := response.Header().Get("WWW-Authenticate")
-	if !strings.Contains(authHeader, `scope="mcp.read"`) {
-		t.Fatalf("WWW-Authenticate = %q, want mcp.read scope hint", authHeader)
+	if strings.Contains(authHeader, `scope=`) {
+		t.Fatalf("WWW-Authenticate = %q, did not want scope hint on invalid_token challenge", authHeader)
 	}
 	if !strings.Contains(authHeader, `resource_metadata="http://localhost:8080/.well-known/oauth-protected-resource/mcp"`) {
 		t.Fatalf("WWW-Authenticate = %q, want path-specific resource metadata URL", authHeader)

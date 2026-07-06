@@ -88,8 +88,8 @@ func TestBearerRejects401WithWWWAuthenticate(t *testing.T) {
 	if !strings.Contains(authHeader, "resource_metadata=") {
 		t.Fatalf("WWW-Authenticate = %q, want resource metadata URL", authHeader)
 	}
-	if !strings.Contains(authHeader, `scope="openid mcp.read mcp.write"`) {
-		t.Fatalf("WWW-Authenticate = %q, want scope hint", authHeader)
+	if strings.Contains(authHeader, `scope=`) {
+		t.Fatalf("WWW-Authenticate = %q, did not want scope hint on invalid_token challenge", authHeader)
 	}
 	if !strings.Contains(authHeader, `error="invalid_token"`) {
 		t.Fatalf("WWW-Authenticate = %q, want invalid_token error", authHeader)
@@ -99,7 +99,7 @@ func TestBearerRejects401WithWWWAuthenticate(t *testing.T) {
 	}
 }
 
-func TestBearerInvalidTokenChallengeIncludesScopeHint(t *testing.T) {
+func TestBearerInvalidTokenChallengeOmitsScopeHint(t *testing.T) {
 	middleware := oauth.Bearer(oauth.BearerConfig{
 		Introspector:        &mockIntrospector{validTokens: map[string]*fosite.AccessRequest{}},
 		ResourceMetadataURL: "https://mcp.example.test/.well-known/oauth-protected-resource",
@@ -122,8 +122,8 @@ func TestBearerInvalidTokenChallengeIncludesScopeHint(t *testing.T) {
 	if !strings.Contains(authHeader, "resource_metadata=") {
 		t.Fatalf("WWW-Authenticate = %q, want resource metadata URL", authHeader)
 	}
-	if !strings.Contains(authHeader, `scope="mcp.read mcp.write"`) {
-		t.Fatalf("WWW-Authenticate = %q, want scope hint", authHeader)
+	if strings.Contains(authHeader, `scope=`) {
+		t.Fatalf("WWW-Authenticate = %q, did not want scope hint on invalid_token challenge", authHeader)
 	}
 	if !strings.Contains(authHeader, `error="invalid_token"`) {
 		t.Fatalf("WWW-Authenticate = %q, want invalid_token error", authHeader)
@@ -258,6 +258,13 @@ func TestBearerRejectsInsufficientScope(t *testing.T) {
 	}
 	if !strings.Contains(response.Body.String(), "insufficient_scope") {
 		t.Fatalf("body = %q, want insufficient_scope", response.Body.String())
+	}
+	authHeader := response.Header().Get("WWW-Authenticate")
+	if !strings.Contains(authHeader, `scope="mcp.write"`) {
+		t.Fatalf("WWW-Authenticate = %q, want required scope hint on insufficient_scope challenge", authHeader)
+	}
+	if !strings.Contains(authHeader, `error="insufficient_scope"`) {
+		t.Fatalf("WWW-Authenticate = %q, want insufficient_scope error", authHeader)
 	}
 }
 
