@@ -244,12 +244,32 @@ func (s *Storage) createSession(ctx context.Context, sessionType string, signatu
 		Data:      data,
 		Active:    true,
 	}
-	if requester.GetSession() != nil {
-		if expiresAt := requester.GetSession().GetExpiresAt(fosite.AccessToken); !expiresAt.IsZero() {
-			session.ExpiresAt = &expiresAt
-		}
+	if expiresAt := sessionExpiresAt(sessionType, requester.GetSession()); !expiresAt.IsZero() {
+		session.ExpiresAt = &expiresAt
 	}
 	return s.store.SaveSession(ctx, session)
+}
+
+func sessionExpiresAt(sessionType string, session fosite.Session) time.Time {
+	if session == nil {
+		return time.Time{}
+	}
+	expiresAt := session.GetExpiresAt(sessionTokenType(sessionType))
+	if !expiresAt.IsZero() {
+		return expiresAt
+	}
+	return session.GetExpiresAt(fosite.AccessToken)
+}
+
+func sessionTokenType(sessionType string) fosite.TokenType {
+	switch sessionType {
+	case SessionTypeAuthorizationCode, SessionTypePKCE, SessionTypeOIDC:
+		return fosite.AuthorizeCode
+	case SessionTypeRefreshToken:
+		return fosite.RefreshToken
+	default:
+		return fosite.AccessToken
+	}
 }
 
 func (s *Storage) getSession(ctx context.Context, sessionType string, signature string, session fosite.Session) (fosite.Requester, error) {

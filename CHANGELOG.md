@@ -11,6 +11,8 @@ The module is pre-1.0. Breaking API changes are allowed between minor versions a
 - `oauth.DefaultAccessTokenLifespan` and `oauth.DefaultRefreshTokenLifespan` constants, now used by `oauth.Config` defaults. Access tokens default to 1 hour to limit stale-token windows; refresh tokens default to 30 days and continue to rotate on use.
 - `oauth.BearerConfig.RequiredScopes`, which adds a `scope="..."` hint to 401 bearer challenges while preserving `resource_metadata`.
 - `resource_name` support in OAuth/OIDC protected-resource metadata helpers.
+- `oauth.ProtectedResourceMetadataPathFor` / `oauth.ProtectedResourceMetadataURLFor` plus `oidc` re-exports for deriving RFC 9728 path-specific protected-resource metadata URLs from the canonical MCP resource URL.
+- `oauth.AuthorizationServerMetadataConfig.Resource` and `ResourceMetadataURL`, emitted as `resource` and `resource_metadata` in OAuth authorization-server metadata when configured.
 - `oauth/consent` — production-oriented authorization endpoint helper shared across Go MCP servers, with `Authenticator`, `Renderer`, `ApprovalTokenStore`, `ConsentPolicy`, and `ChallengeProvider` interfaces.
 - `oauth/consent/hmacstore` and `oauth/consent/sessionstore` — stock approval-token backends for stateless and session-backed consent flows.
 - `oauth/consent/consenttest` — fixtures for in-memory provider setup and canonical consent-handler tests.
@@ -31,11 +33,14 @@ The module is pre-1.0. Breaking API changes are allowed between minor versions a
 ### Changed
 
 - `Provider.AuthorizeHandler` docstring now calls out that it is demo-oriented and points production consumers to `oauth/consent`. Behavior is unchanged.
+- OIDC/OAuth discovery metadata now includes `resource`, `resource_metadata`, and `response_modes_supported=["query"]` when route registration knows the protected resource URL.
+- `oidc.DiscoveryConfig.RegisterRoutes` now mounts the RFC 9728 path-specific protected-resource metadata route derived from `RouteConfig.ResourceURL`, while keeping the root `/.well-known/oauth-protected-resource` route for compatibility.
 
 ### Fixed
 
 - Bearer challenges now include OAuth `error` and `error_description` auth-params in `WWW-Authenticate`, so clients can classify unauthenticated MCP startup as a login-required OAuth flow instead of a generic transport failure.
 - Ent-backed dynamic OAuth clients can now whitelist and round-trip the default MCP audience needed by PKCE authorization.
+- OAuth storage now persists refresh-token session rows with the refresh-token expiry instead of reusing the access-token expiry for every session type.
 
 ## v0.1.0 - 2026-05-01
 

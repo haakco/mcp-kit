@@ -33,6 +33,11 @@ func newHandler() (http.Handler, error) {
 	if err != nil {
 		return nil, err
 	}
+	resourceURL := issuerURL() + "/mcp"
+	resourceMetadataURL, err := oauth.ProtectedResourceMetadataURLFor(resourceURL)
+	if err != nil {
+		return nil, err
+	}
 
 	mcpServer, err := mcpkit.New(mcpkit.Config{
 		Handler:        http.HandlerFunc(handleMCP),
@@ -41,9 +46,9 @@ func newHandler() (http.Handler, error) {
 		Bearer: mcpkit.BearerConfig{
 			Introspector:        oauthProvider.OAuth2Provider(),
 			TokenValidator:      staticTokenValidator{},
-			ResourceMetadataURL: issuerURL() + "/.well-known/oauth-protected-resource",
+			ResourceMetadataURL: resourceMetadataURL,
 			RequiredScopes:      []string{"mcp.read"},
-			ExpectedAudience:    issuerURL() + "/mcp",
+			ExpectedAudience:    resourceURL,
 		},
 	})
 	if err != nil {
@@ -53,7 +58,7 @@ func newHandler() (http.Handler, error) {
 	mux := http.NewServeMux()
 	discovery := oidc.NewDiscoveryConfig(issuerURL(), []string{"mcp.read"})
 	discovery.RegisterRoutes(mux, oidc.RouteConfig{
-		ResourceURL: issuerURL() + "/mcp",
+		ResourceURL: resourceURL,
 		JWKS:        oidc.JWKSHandler(keyManager),
 	})
 	// Demo only: production servers must authenticate the browser session and

@@ -62,12 +62,16 @@ func TestMinimalServerRejectsMissingToken(t *testing.T) {
 	if response.Code != http.StatusUnauthorized {
 		t.Fatalf("status = %d, want 401", response.Code)
 	}
-	if authHeader := response.Header().Get("WWW-Authenticate"); !strings.Contains(authHeader, `scope="mcp.read"`) {
+	authHeader := response.Header().Get("WWW-Authenticate")
+	if !strings.Contains(authHeader, `scope="mcp.read"`) {
 		t.Fatalf("WWW-Authenticate = %q, want mcp.read scope hint", authHeader)
+	}
+	if !strings.Contains(authHeader, `resource_metadata="http://localhost:8080/.well-known/oauth-protected-resource/mcp"`) {
+		t.Fatalf("WWW-Authenticate = %q, want path-specific resource metadata URL", authHeader)
 	}
 
 	metadata := httptest.NewRecorder()
-	handler.ServeHTTP(metadata, httptest.NewRequest(http.MethodGet, "/.well-known/oauth-protected-resource", nil))
+	handler.ServeHTTP(metadata, httptest.NewRequest(http.MethodGet, "/.well-known/oauth-protected-resource/mcp", nil))
 	if metadata.Code != http.StatusOK {
 		t.Fatalf("protected resource metadata status = %d, want 200", metadata.Code)
 	}

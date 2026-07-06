@@ -131,7 +131,37 @@ func TestStorageRefreshTokenRotation(t *testing.T) {
 	}
 }
 
+func TestStoragePersistsTokenTypeSpecificExpiry(t *testing.T) {
+	memory := newTestMemoryStore(t)
+	store := storage.New(memory)
+	accessExpiry := time.Now().UTC().Add(time.Hour).Truncate(time.Second)
+	refreshExpiry := time.Now().UTC().Add(30 * 24 * time.Hour).Truncate(time.Second)
+	requester := newRequesterWithExpiries("expiry-request", "expiry-subject", accessExpiry, refreshExpiry, "skills.read")
+
+	if err := store.CreateAccessTokenSession(t.Context(), "access-expiry", requester); err != nil {
+		t.Fatalf("CreateAccessTokenSession() error = %v", err)
+	}
+	if err := store.CreateRefreshTokenSession(t.Context(), "refresh-expiry", "", requester); err != nil {
+		t.Fatalf("CreateRefreshTokenSession() error = %v", err)
+	}
+
+	accessRow, err := memory.GetSession(t.Context(), storage.SessionTypeAccessToken, "access-expiry")
+	if err != nil {
+		t.Fatalf("GetSession(access) error = %v", err)
+	}
+	refreshRow, err := memory.GetSession(t.Context(), storage.SessionTypeRefreshToken, "refresh-expiry")
+	if err != nil {
+		t.Fatalf("GetSession(refresh) error = %v", err)
+	}
+	assertSessionExpiry(t, accessRow, accessExpiry)
+	assertSessionExpiry(t, refreshRow, refreshExpiry)
+}
+
 func newTestStorage(t *testing.T) *storage.Storage {
+	return storage.New(newTestMemoryStore(t))
+}
+
+func newTestMemoryStore(t *testing.T) *storage.MemoryStore {
 	t.Helper()
 
 	memory := storage.NewMemoryStore()
@@ -147,16 +177,36 @@ func newTestStorage(t *testing.T) *storage.Storage {
 		t.Fatalf("SaveClient() error = %v", err)
 	}
 
-	return storage.New(memory)
+	return memory
 }
 
 func newRequester(id string, subject string, scopes ...string) fosite.Requester {
+	return newRequesterWithExpiries(
+		id,
+		subject,
+		time.Now().UTC().Add(time.Hour).Truncate(time.Second),
+		time.Time{},
+		scopes...,
+	)
+}
+
+func newRequesterWithExpiries(
+	id string,
+	subject string,
+	accessExpiry time.Time,
+	refreshExpiry time.Time,
+	scopes ...string,
+) fosite.Requester {
+	expiresAt := map[fosite.TokenType]time.Time{
+		fosite.AccessToken: accessExpiry,
+	}
+	if !refreshExpiry.IsZero() {
+		expiresAt[fosite.RefreshToken] = refreshExpiry
+	}
 	session := &oidcsession.DefaultSession{
-		Subject:  subject,
-		Username: "roundtrip@example.com",
-		ExpiresAt: map[fosite.TokenType]time.Time{
-			fosite.AccessToken: time.Now().UTC().Add(time.Hour).Truncate(time.Second),
-		},
+		Subject:   subject,
+		Username:  "roundtrip@example.com",
+		ExpiresAt: expiresAt,
 	}
 	return &fosite.Request{
 		ID:                id,
@@ -171,6 +221,17 @@ func newRequester(id string, subject string, scopes ...string) fosite.Requester 
 			"code_challenge_method": {"S256"},
 			"redirect_uri":          {"http://127.0.0.1/callback"},
 		},
+	}
+}
+
+func assertSessionExpiry(t *testing.T, row storage.Session, want time.Time) {
+	t.Helper()
+
+	if row.ExpiresAt == nil {
+		t.Fatalf("%s ExpiresAt = nil, want %s", row.Type, want.Format(time.RFC3339))
+	}
+	if !row.ExpiresAt.Equal(want) {
+		t.Fatalf("%s ExpiresAt = %s, want %s", row.Type, row.ExpiresAt.Format(time.RFC3339), want.Format(time.RFC3339))
 	}
 }
 

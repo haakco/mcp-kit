@@ -69,6 +69,7 @@ mcp-kit/
 │   ├── provider.go                     # New() — constructs Fosite provider with our compose
 │   ├── handlers.go                     # /authorize, /token, /register, /revoke as http.HandlerFuncs
 │   ├── middleware.go                   # Bearer middleware (OAuth + PAT, canonical envelopes)
+│   ├── metadata_url.go                 # RFC 9728 protected-resource metadata URL derivation
 │   ├── token_validator.go              # TokenValidator interface + impl
 │   ├── pat.go                          # PAT validator + interface
 │   ├── login_classify.go               # Fixed-vocabulary login error classifier
@@ -87,7 +88,8 @@ mcp-kit/
 │
 ├── oidc/                               # OIDC + OAuth discovery endpoints
 │   ├── discovery.go                    # /.well-known/oauth-authorization-server, openid-configuration
-│   ├── protected_resource.go           # /.well-known/oauth-protected-resource
+│   ├── metadata_url.go                 # re-exported protected-resource metadata URL helpers
+│   ├── protected_resource.go           # /.well-known/oauth-protected-resource and path-specific aliases
 │   ├── jwks.go                         # /.well-known/jwks.json
 │   └── *_test.go
 │

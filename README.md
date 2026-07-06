@@ -12,7 +12,7 @@ A reusable Go library for building production-grade Model Context Protocol (MCP)
 - **Bearer middleware** that accepts both OAuth-issued JWTs and Personal Access Tokens
 - **JSON-RPC envelope rewriter** so SDK protocol errors come out as canonical JSON-RPC envelopes (not plain-text 400s)
 - **Origin allowlist** with explicit loopback allowance for browser MCP clients
-- **OIDC / OAuth discovery endpoints** (`/.well-known/openid-configuration`, `/.well-known/oauth-authorization-server`, `/.well-known/oauth-protected-resource`, `/.well-known/jwks.json`)
+- **OIDC / OAuth discovery endpoints** (`/.well-known/openid-configuration`, `/.well-known/oauth-authorization-server`, `/.well-known/oauth-protected-resource`, path-specific protected-resource metadata, `/.well-known/jwks.json`)
 - **CLI auth helper** (`mcpkit/cliauth`) with browser-based PKCE flow and issuer-scoped 0600 file-backed token cache
 - **Ent schema mixins** for OAuth tables (`oauth_client`, `oauth_signing_key`, `oauth_authorization_code`, `oauth_access_token`, `oauth_refresh_token`, `personal_access_token`)
 - **E2E test methodology** templates with phased dispatch runbook, evidence captures, and lessons-learned IDs
@@ -47,6 +47,10 @@ func main() {
     })
     if err != nil { /* handle */ }
 
+    resourceURL := "https://my-mcp.example.com/mcp"
+    resourceMetadataURL, err := oauth.ProtectedResourceMetadataURLFor(resourceURL)
+    if err != nil { /* handle */ }
+
     // 2. Wrap your official Go SDK MCP HTTP handler.
     // The handler still owns domain authorization and audit: validate scopes,
     // check RBAC, and emit audit events inside each tool/resource.
@@ -59,9 +63,9 @@ func main() {
             TokenValidator:      myapp.NewPATValidator(db),
             Introspector:        oauthProv.OAuth2Provider(),
             SessionFactory:      oauth.NewEmptySession,
-            ResourceMetadataURL: "https://my-mcp.example.com/.well-known/oauth-protected-resource",
+            ResourceMetadataURL: resourceMetadataURL,
             RequiredScopes:      []string{"mcp.read"},
-            ExpectedAudience:    "https://my-mcp.example.com/mcp",
+            ExpectedAudience:    resourceURL,
         },
         AllowedOrigins: []string{"https://my-mcp.example.com"},
         AllowLoopback:  isDev,
@@ -86,7 +90,7 @@ func main() {
 
     discovery := oidc.NewDiscoveryConfig("https://my-mcp.example.com", []string{"mcp.read", "mcp.write"})
     discovery.RegisterRoutes(mux, oidc.RouteConfig{
-        ResourceURL: "https://my-mcp.example.com/mcp",
+        ResourceURL: resourceURL,
         JWKS:        oidc.JWKSHandler(myapp.NewOAuthKeyManager(db)),
     })
 
@@ -103,7 +107,7 @@ handlers.
 
 By default, `oauth.Config` issues 1-hour access tokens and 30-day rotating refresh tokens. The short access-token lifetime limits the stale-token window when a client keeps sending a token that the server has already invalidated through revocation, database reset, or session cleanup.
 
-For MCP clients using OAuth-backed Streamable HTTP, the standards-based recovery signal is the `WWW-Authenticate` bearer challenge on `401 Unauthorized`. `mcp-kit` includes `resource_metadata`, `scope`, `error="invalid_token"`, and `error_description` on invalid-token challenges, and publishes protected-resource metadata with `authorization_servers`, `bearer_methods_supported=["header"]`, `resource_name`, and `scopes_supported` when configured. Some clients, including observed Codex/rmcp versions, still only refresh proactively from their local expiry timestamp and do not refresh/retry when the server returns `401 invalid_token`; lowering the access-token lifetime reduces that stale window but does not replace client-side 401 recovery.
+For MCP clients using OAuth-backed Streamable HTTP, the standards-based recovery signal is the `WWW-Authenticate` bearer challenge on `401 Unauthorized`. `mcp-kit` includes `resource_metadata`, `scope`, `error="invalid_token"`, and `error_description` on invalid-token challenges, and publishes protected-resource metadata with `authorization_servers`, `bearer_methods_supported=["header"]`, `resource_name`, and `scopes_supported` when configured. Use `oauth.ProtectedResourceMetadataURLFor(resourceURL)` to keep the 401 challenge and discovery documents on the same RFC 9728 path, such as `/.well-known/oauth-protected-resource/mcp` for a `/mcp` resource. Some clients, including observed Codex/rmcp versions, still only refresh proactively from their local expiry timestamp and do not refresh/retry when the server returns `401 invalid_token`; lowering the access-token lifetime reduces that stale window but does not replace client-side 401 recovery.
 
 ## Documentation
 

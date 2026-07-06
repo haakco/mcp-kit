@@ -12,14 +12,18 @@
 //
 //	// sdkHandler is the consumer-owned official SDK handler. Register tools on
 //	// that SDK server, and enforce domain authz/audit inside those tool handlers.
+//	resourceURL := "https://app.example.com/mcp"
+//	resourceMetadataURL, err := oauth.ProtectedResourceMetadataURLFor(resourceURL)
+//	if err != nil { return err }
+//
 //	mcpServer, err := mcpkit.New(mcpkit.Config{
 //	    Handler: sdkHandler,
 //	    Bearer: mcpkit.BearerConfig{
 //	        Introspector:        oauthProv.OAuth2Provider(),
 //	        SessionFactory:      oauth.NewEmptySession,
-//	        ResourceMetadataURL: "https://app.example.com/.well-known/oauth-protected-resource",
+//	        ResourceMetadataURL: resourceMetadataURL,
 //	        RequiredScopes:      []string{"mcp.read"},
-//	        ExpectedAudience:    "https://app.example.com/mcp",
+//	        ExpectedAudience:    resourceURL,
 //	    },
 //	    AllowedOrigins: []string{"https://app.example.com"},
 //	    AllowLoopback:  isDev,

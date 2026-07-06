@@ -138,6 +138,14 @@ MCP clients recover best when every `/mcp` 401 challenge includes `resource_meta
 
 Short access tokens are correct for OAuth-backed Streamable HTTP MCP because some clients do not refresh/retry when the server returns `401 invalid_token`; they only refresh from locally stored expiry metadata. Use a 1-hour access-token default to reduce stale-token windows, and rely on 30-day rotating refresh tokens for longer sessions. Keep both lifetimes overrideable per consumer.
 
+### OG-08 - Resource metadata URLs must be derived from the resource URL
+
+For a protected resource at `/mcp`, the canonical RFC 9728 metadata URL is `/.well-known/oauth-protected-resource/mcp`, not only the root `/.well-known/oauth-protected-resource`. Derive `resource_metadata` from the MCP resource URL and use the same value in 401 challenges and authorization-server metadata. Keep the root metadata route as a compatibility alias, but do not advertise a different URL than the path-specific route clients are expected to discover.
+
+### OG-09 - Refresh-token storage needs refresh-token expiry
+
+When storing Fosite sessions, persist the expiry that matches the session type. Refresh-token rows should use `fosite.RefreshToken`, not `fosite.AccessToken`, or stores that enforce row expiry can delete refresh sessions when the short access token expires. This makes "lower the access-token TTL so clients refresh sooner" backfire by removing the refresh path.
+
 ## JSON-RPC Envelope Traps
 
 ### JR-01 - Echo request IDs exactly

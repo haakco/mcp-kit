@@ -57,6 +57,8 @@ func TestAuthorizationServerMetadataHandler(t *testing.T) {
 		AuthorizationEndpoint: "https://vorrent.example.test/mcp-oauth/authorize",
 		TokenEndpoint:         "https://vorrent.example.test/mcp-oauth/token",
 		RegistrationEndpoint:  "https://vorrent.example.test/mcp-oauth/register",
+		Resource:              "https://vorrent.example.test/mcp",
+		ResourceMetadataURL:   "https://vorrent.example.test/.well-known/oauth-protected-resource/mcp",
 		ScopesSupported:       []string{"mcp.read", "mcp.write", "offline_access"},
 	})
 
@@ -71,8 +73,11 @@ func TestAuthorizationServerMetadataHandler(t *testing.T) {
 		AuthorizationEndpoint         string   `json:"authorization_endpoint"`
 		TokenEndpoint                 string   `json:"token_endpoint"`
 		RegistrationEndpoint          string   `json:"registration_endpoint"`
+		Resource                      string   `json:"resource"`
+		ResourceMetadataURL           string   `json:"resource_metadata"`
 		GrantTypesSupported           []string `json:"grant_types_supported"`
 		ResponseTypesSupported        []string `json:"response_types_supported"`
+		ResponseModesSupported        []string `json:"response_modes_supported"`
 		CodeChallengeMethodsSupported []string `json:"code_challenge_methods_supported"`
 		TokenEndpointAuthMethods      []string `json:"token_endpoint_auth_methods_supported"`
 		ScopesSupported               []string `json:"scopes_supported"`
@@ -92,11 +97,20 @@ func TestAuthorizationServerMetadataHandler(t *testing.T) {
 	if body.RegistrationEndpoint != "https://vorrent.example.test/mcp-oauth/register" {
 		t.Fatalf("registration_endpoint = %q", body.RegistrationEndpoint)
 	}
+	if body.Resource != "https://vorrent.example.test/mcp" {
+		t.Fatalf("resource = %q", body.Resource)
+	}
+	if body.ResourceMetadataURL != "https://vorrent.example.test/.well-known/oauth-protected-resource/mcp" {
+		t.Fatalf("resource_metadata = %q", body.ResourceMetadataURL)
+	}
 	if !slices.Equal(body.GrantTypesSupported, []string{"authorization_code", "refresh_token"}) {
 		t.Fatalf("grant_types_supported = %#v", body.GrantTypesSupported)
 	}
 	if !slices.Equal(body.ResponseTypesSupported, []string{"code"}) {
 		t.Fatalf("response_types_supported = %#v", body.ResponseTypesSupported)
+	}
+	if !slices.Equal(body.ResponseModesSupported, []string{"query"}) {
+		t.Fatalf("response_modes_supported = %#v", body.ResponseModesSupported)
 	}
 	if !slices.Equal(body.CodeChallengeMethodsSupported, []string{"S256"}) {
 		t.Fatalf("code_challenge_methods_supported = %#v", body.CodeChallengeMethodsSupported)

@@ -14,6 +14,8 @@ const signingAlgorithm = "RS256"
 type DiscoveryConfig struct {
 	Issuer                string
 	ResourceName          string
+	ResourceURL           string
+	ResourceMetadataURL   string
 	AuthorizationEndpoint string
 	TokenEndpoint         string
 	JWKSEndpoint          string
@@ -55,7 +57,7 @@ func NewDiscoveryConfig(issuerURL string, scopes []string) DiscoveryConfig {
 // OpenIDConfiguration returns the OIDC discovery document. The same shape is
 // also valid OAuth authorization server metadata for the kit's supported flows.
 func (d DiscoveryConfig) OpenIDConfiguration() map[string]any {
-	return map[string]any{
+	doc := map[string]any{
 		"issuer":                                d.Issuer,
 		"authorization_endpoint":                d.AuthorizationEndpoint,
 		"token_endpoint":                        d.TokenEndpoint,
@@ -63,6 +65,7 @@ func (d DiscoveryConfig) OpenIDConfiguration() map[string]any {
 		"revocation_endpoint":                   d.RevocationEndpoint,
 		"registration_endpoint":                 d.RegistrationEndpoint,
 		"response_types_supported":              []string{"code"},
+		"response_modes_supported":              []string{"query"},
 		"grant_types_supported":                 []string{"authorization_code", "refresh_token"},
 		"subject_types_supported":               []string{"public"},
 		"id_token_signing_alg_values_supported": []string{signingAlgorithm},
@@ -70,6 +73,13 @@ func (d DiscoveryConfig) OpenIDConfiguration() map[string]any {
 		"token_endpoint_auth_methods_supported": []string{"none", "client_secret_basic", "client_secret_post"},
 		"code_challenge_methods_supported":      []string{"S256"},
 	}
+	if d.ResourceURL != "" {
+		doc["resource"] = d.ResourceURL
+	}
+	if d.ResourceMetadataURL != "" {
+		doc["resource_metadata"] = d.ResourceMetadataURL
+	}
+	return doc
 }
 
 // AuthorizationServerMetadata returns RFC 8414 metadata.
@@ -111,6 +121,11 @@ func (d DiscoveryConfig) RegisterRoutes(mux *http.ServeMux, cfg RouteConfig) {
 	if resourceURL == "" {
 		resourceURL = d.Issuer + "/mcp"
 	}
+	resourceURL = strings.TrimRight(resourceURL, "/")
+	d.ResourceURL = resourceURL
+	if metadataURL, err := ProtectedResourceMetadataURLFor(resourceURL); err == nil {
+		d.ResourceMetadataURL = metadataURL
+	}
 	if cfg.ResourceName != "" {
 		d.ResourceName = cfg.ResourceName
 	}
@@ -118,7 +133,9 @@ func (d DiscoveryConfig) RegisterRoutes(mux *http.ServeMux, cfg RouteConfig) {
 	mux.Handle("/.well-known/oauth-authorization-server", d.AuthorizationServerHandler())
 	protectedResourceHandler := d.ProtectedResourceHandler(resourceURL)
 	mux.Handle("/.well-known/oauth-protected-resource", protectedResourceHandler)
-	mux.Handle("/.well-known/oauth-protected-resource/mcp", protectedResourceHandler)
+	if metadataPath, err := ProtectedResourceMetadataPathFor(resourceURL); err == nil && metadataPath != "/.well-known/oauth-protected-resource" {
+		mux.Handle(metadataPath, protectedResourceHandler)
+	}
 	if cfg.JWKS != nil {
 		mux.Handle("/.well-known/jwks.json", cfg.JWKS)
 	}
