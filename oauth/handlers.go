@@ -1,9 +1,14 @@
 package oauth
 
 import (
+	"bytes"
+	"context"
 	"encoding/base64"
+	"errors"
 	"net/http"
+	"strings"
 
+	"github.com/haakco/mcp-kit/audit"
 	"github.com/ory/fosite"
 )
 
@@ -75,21 +80,192 @@ func (p *Provider) TokenHandler() http.Handler {
 			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 			return
 		}
-
-		requester, err := p.oauth.NewAccessRequest(ctx, r, NewEmptySession())
-		if err != nil {
-			p.oauth.WriteAccessError(ctx, w, requester, err)
+		if err := r.ParseForm(); err != nil {
+			http.Error(w, "invalid form", http.StatusBadRequest)
 			return
 		}
-		p.grantDefaultAudience(requester)
 
-		response, err := p.oauth.NewAccessResponse(ctx, requester)
-		if err != nil {
-			p.oauth.WriteAccessError(ctx, w, requester, err)
+		grantType := r.PostForm.Get("grant_type")
+		clientID := r.PostForm.Get("client_id")
+		if grantType == "refresh_token" && p.replayWindow > 0 {
+			p.handleReplayableRefresh(w, r, clientID)
 			return
 		}
-		p.oauth.WriteAccessResponse(ctx, w, requester, response)
+
+		recorder := p.executeTokenRequest(ctx, r, grantType, clientID, false)
+		writeReplay(w, recorder.replay())
 	})
+}
+
+func (p *Provider) handleReplayableRefresh(w http.ResponseWriter, r *http.Request, clientID string) {
+	refreshToken := r.PostForm.Get("refresh_token")
+	if refreshToken == "" {
+		recorder := p.executeTokenRequest(r.Context(), r, "refresh_token", clientID, false)
+		writeReplay(w, recorder.replay())
+		return
+	}
+	key := refreshReplayKey(clientID, refreshToken)
+	now := p.now().UTC()
+	if replay, ok := p.replayCache.get(key, now); ok {
+		writeReplay(w, replay)
+		p.emitTokenAudit(r.Context(), "oauth_refresh", "replayed", nil, "refresh_token", clientID, nil, true)
+		return
+	}
+
+	value, _, _ := p.replayCache.group.Do(key, func() (any, error) {
+		if replay, ok := p.replayCache.get(key, p.now().UTC()); ok {
+			return replay, nil
+		}
+		recorder := p.executeTokenRequest(r.Context(), r, "refresh_token", clientID, false)
+		replay := recorder.replay()
+		p.storeRefreshReplay(clientID, refreshToken, replay)
+		return replay, nil
+	})
+	replay, ok := value.(replayedTokenResponse)
+	if !ok || replay.status == 0 {
+		http.Error(w, "token exchange failed", http.StatusInternalServerError)
+		return
+	}
+	writeReplay(w, replay)
+}
+
+func (p *Provider) executeTokenRequest(
+	ctx context.Context,
+	r *http.Request,
+	grantType string,
+	clientID string,
+	replayed bool,
+) *tokenResponseRecorder {
+	recorder := newTokenResponseRecorder()
+	requester, err := p.oauth.NewAccessRequest(ctx, r, NewEmptySession())
+	if err != nil {
+		p.emitTokenAudit(ctx, "oauth_token_exchange", "failed", requester, grantType, clientID, err, replayed)
+		p.oauth.WriteAccessError(ctx, recorder, requester, err)
+		return recorder
+	}
+	clientID = requester.GetClient().GetID()
+	p.grantDefaultAudience(requester)
+
+	response, err := p.oauth.NewAccessResponse(ctx, requester)
+	if err != nil {
+		p.emitTokenAudit(ctx, "oauth_token_exchange", "failed", requester, grantType, clientID, err, replayed)
+		p.oauth.WriteAccessError(ctx, recorder, requester, err)
+		return recorder
+	}
+	p.oauth.WriteAccessResponse(ctx, recorder, requester, response)
+	if grantType == "refresh_token" {
+		p.emitTokenAudit(ctx, "oauth_refresh", "rotated", requester, grantType, clientID, nil, replayed)
+	} else {
+		p.emitTokenAudit(ctx, "oauth_token", "issued", requester, grantType, clientID, nil, replayed)
+	}
+	return recorder
+}
+
+func (p *Provider) storeRefreshReplay(clientID string, refreshToken string, replay replayedTokenResponse) {
+	if replay.status < http.StatusOK || replay.status >= http.StatusMultipleChoices {
+		return
+	}
+	if refreshToken == "" {
+		return
+	}
+	p.replayCache.set(refreshReplayKey(clientID, refreshToken), replayedTokenResponse{
+		body:      replay.body,
+		header:    replay.header,
+		status:    replay.status,
+		expiresAt: p.now().UTC().Add(p.replayWindow),
+	})
+}
+
+func writeReplay(w http.ResponseWriter, replay replayedTokenResponse) {
+	for key, values := range replay.header {
+		for _, value := range values {
+			w.Header().Add(key, value)
+		}
+	}
+	w.WriteHeader(replay.status)
+	_, _ = w.Write(replay.body) //nolint:errcheck // replay response already committed; caller cannot recover from write errors
+}
+
+func (p *Provider) emitTokenAudit(
+	ctx context.Context,
+	entityType string,
+	action string,
+	requester fosite.AccessRequester,
+	grantType string,
+	clientID string,
+	err error,
+	replayed bool,
+) {
+	if p.auditEmitter == nil {
+		return
+	}
+	scope := ""
+	if requester != nil {
+		scope = strings.Join(requester.GetGrantedScopes(), " ")
+		if clientID == "" && requester.GetClient() != nil {
+			clientID = requester.GetClient().GetID()
+		}
+	}
+	event := audit.Event{
+		EntityType: entityType,
+		Action:     action,
+		ClientID:   clientID,
+		Scope:      scope,
+		Metadata: map[string]any{
+			"grant_type": grantType,
+			"replayed":   replayed,
+		},
+		Timestamp: p.now().UTC(),
+	}
+	if err != nil {
+		event.Metadata["error_code"] = oauthErrorCode(err)
+	}
+	_ = p.auditEmitter.Emit(ctx, event) //nolint:errcheck // audit is non-blocking for token endpoint availability
+}
+
+func oauthErrorCode(err error) string {
+	var oauthErr *fosite.RFC6749Error
+	if errors.As(err, &oauthErr) && oauthErr.ErrorField != "" {
+		return oauthErr.ErrorField
+	}
+	return "unknown"
+}
+
+type tokenResponseRecorder struct {
+	header http.Header
+	body   bytes.Buffer
+	status int
+}
+
+func newTokenResponseRecorder() *tokenResponseRecorder {
+	return &tokenResponseRecorder{header: http.Header{}}
+}
+
+func (r *tokenResponseRecorder) Header() http.Header {
+	return r.header
+}
+
+func (r *tokenResponseRecorder) WriteHeader(status int) {
+	r.status = status
+}
+
+func (r *tokenResponseRecorder) Write(data []byte) (int, error) {
+	if r.status == 0 {
+		r.status = http.StatusOK
+	}
+	return r.body.Write(data)
+}
+
+func (r *tokenResponseRecorder) replay() replayedTokenResponse {
+	status := r.status
+	if status == 0 {
+		status = http.StatusOK
+	}
+	return replayedTokenResponse{
+		body:   r.body.Bytes(),
+		header: r.header,
+		status: status,
+	}
 }
 
 // RevokeHandler returns the OAuth token revocation endpoint.

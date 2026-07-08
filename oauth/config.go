@@ -6,6 +6,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/haakco/mcp-kit/audit"
 	"github.com/haakco/mcp-kit/oauth/keys"
 	"github.com/haakco/mcp-kit/oauth/storage"
 )
@@ -35,9 +36,22 @@ type Config struct {
 	RefreshTokenLifespan  time.Duration
 	AuthorizeCodeLifespan time.Duration
 	IDTokenLifespan       time.Duration
+
+	AuditEmitter audit.Emitter
+
+	// RefreshReplayWindow lets parallel clients replay the same successful
+	// refresh-token response for a short window after rotation.
+	RefreshReplayWindow time.Duration
+	Now                 func() time.Time
 }
 
 func (c *Config) applyDefaults() error {
+	if c.AuditEmitter == nil {
+		c.AuditEmitter = audit.Discard()
+	}
+	if c.Now == nil {
+		c.Now = time.Now
+	}
 	if c.AccessTokenLifespan == 0 {
 		c.AccessTokenLifespan = DefaultAccessTokenLifespan
 	}

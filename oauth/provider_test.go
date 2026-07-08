@@ -16,6 +16,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/haakco/mcp-kit/audit"
 	"github.com/haakco/mcp-kit/oauth"
 	"github.com/haakco/mcp-kit/oauth/keys"
 	"github.com/haakco/mcp-kit/oauth/storage"
@@ -447,6 +448,136 @@ func TestRefreshTokenRotation(t *testing.T) {
 	}
 }
 
+func TestRefreshTokenReplayWindowReturnsCachedRotation(t *testing.T) {
+	store := storage.NewMemoryStore()
+	now := time.Date(2026, 7, 8, 16, 0, 0, 0, time.UTC)
+	provider := newTestProviderWithConfig(t, store, oauth.Config{
+		RefreshReplayWindow: 5 * time.Minute,
+		Now:                 func() time.Time { return now },
+	})
+	savePKCEClient(t, store)
+	server := newOAuthTestServer(provider)
+	defer server.Close()
+
+	code := authorizeCode(t, server, "test-code-verifier-1234567890-must-be-at-least-43-characters-long", "state-123456")
+	tokenResponse := exchangeCode(t, server, code, "test-code-verifier-1234567890-must-be-at-least-43-characters-long")
+	refreshToken := decodeTokenField(t, tokenResponse, "refresh_token")
+
+	first := refreshTokenRequest(t, server.URL, refreshToken)
+	firstBody := readResponseBody(t, first)
+	if first.StatusCode != http.StatusOK {
+		t.Fatalf("first refresh status = %d, want 200; body=%s", first.StatusCode, firstBody)
+	}
+
+	second := refreshTokenRequest(t, server.URL, refreshToken)
+	secondBody := readResponseBody(t, second)
+	if second.StatusCode != http.StatusOK {
+		t.Fatalf("second refresh status = %d, want replay 200; body=%s", second.StatusCode, secondBody)
+	}
+	if secondBody != firstBody {
+		t.Fatalf("replayed body changed\nfirst:  %s\nsecond: %s", firstBody, secondBody)
+	}
+}
+
+func TestRefreshTokenReplayWindowHandlesConcurrentReuse(t *testing.T) {
+	store := storage.NewMemoryStore()
+	provider := newTestProviderWithConfig(t, store, oauth.Config{
+		RefreshReplayWindow: 5 * time.Minute,
+	})
+	savePKCEClient(t, store)
+	server := newOAuthTestServer(provider)
+	defer server.Close()
+
+	code := authorizeCode(t, server, "test-code-verifier-1234567890-must-be-at-least-43-characters-long", "state-123456")
+	tokenResponse := exchangeCode(t, server, code, "test-code-verifier-1234567890-must-be-at-least-43-characters-long")
+	refreshToken := decodeTokenField(t, tokenResponse, "refresh_token")
+
+	const attempts = 6
+	start := make(chan struct{})
+	var wg sync.WaitGroup
+	bodies := make([]string, attempts)
+	statuses := make([]int, attempts)
+	for i := range attempts {
+		wg.Add(1)
+		go func(index int) {
+			defer wg.Done()
+			<-start
+			response := refreshTokenRequest(t, server.URL, refreshToken)
+			statuses[index] = response.StatusCode
+			bodies[index] = readResponseBody(t, response)
+		}(i)
+	}
+	close(start)
+	wg.Wait()
+
+	for i, status := range statuses {
+		if status != http.StatusOK {
+			t.Fatalf("refresh attempt %d status = %d, want replay 200; body=%s", i, status, bodies[i])
+		}
+		if bodies[i] != bodies[0] {
+			t.Fatalf("refresh attempt %d body changed\nfirst: %s\n got:  %s", i, bodies[0], bodies[i])
+		}
+	}
+}
+
+func TestRefreshTokenReplayWindowExpires(t *testing.T) {
+	store := storage.NewMemoryStore()
+	now := time.Date(2026, 7, 8, 16, 0, 0, 0, time.UTC)
+	provider := newTestProviderWithConfig(t, store, oauth.Config{
+		RefreshReplayWindow: 5 * time.Minute,
+		Now:                 func() time.Time { return now },
+	})
+	savePKCEClient(t, store)
+	server := newOAuthTestServer(provider)
+	defer server.Close()
+
+	code := authorizeCode(t, server, "test-code-verifier-1234567890-must-be-at-least-43-characters-long", "state-123456")
+	tokenResponse := exchangeCode(t, server, code, "test-code-verifier-1234567890-must-be-at-least-43-characters-long")
+	refreshToken := decodeTokenField(t, tokenResponse, "refresh_token")
+
+	first := refreshTokenRequest(t, server.URL, refreshToken)
+	firstBody := readResponseBody(t, first)
+	if first.StatusCode != http.StatusOK {
+		t.Fatalf("first refresh status = %d, want 200; body=%s", first.StatusCode, firstBody)
+	}
+
+	now = now.Add(5*time.Minute + time.Second)
+	reused := refreshTokenRequest(t, server.URL, refreshToken)
+	defer func() { _ = reused.Body.Close() }()
+	if reused.StatusCode == http.StatusOK {
+		t.Fatal("expired replay window accepted stale refresh token")
+	}
+}
+
+func TestTokenEndpointEmitsAuditEvents(t *testing.T) {
+	store := storage.NewMemoryStore()
+	emitter := &recordingAuditEmitter{}
+	provider := newTestProviderWithConfig(t, store, oauth.Config{AuditEmitter: emitter})
+	savePKCEClient(t, store)
+	server := newOAuthTestServer(provider)
+	defer server.Close()
+
+	code := authorizeCode(t, server, "test-code-verifier-1234567890-must-be-at-least-43-characters-long", "state-123456")
+	tokenResponse := exchangeCode(t, server, code, "test-code-verifier-1234567890-must-be-at-least-43-characters-long")
+	refreshToken := decodeTokenField(t, tokenResponse, "refresh_token")
+
+	rotated := refreshTokenRequest(t, server.URL, refreshToken)
+	refreshBody := readResponseBody(t, rotated)
+	if rotated.StatusCode != http.StatusOK {
+		t.Fatalf("refresh status = %d, want 200; body=%s", rotated.StatusCode, refreshBody)
+	}
+
+	reused := refreshTokenRequest(t, server.URL, refreshToken)
+	reuseBody := readResponseBody(t, reused)
+	if reused.StatusCode == http.StatusOK {
+		t.Fatalf("reuse unexpectedly succeeded; body=%s", reuseBody)
+	}
+
+	assertAuditEvent(t, emitter.events, "oauth_token", "issued", "authorization_code")
+	assertAuditEvent(t, emitter.events, "oauth_refresh", "rotated", "refresh_token")
+	assertAuditEvent(t, emitter.events, "oauth_token_exchange", "failed", "refresh_token")
+}
+
 func TestTokenInvalidGrantEnvelopeOnPKCEFailure(t *testing.T) {
 	store := storage.NewMemoryStore()
 	provider := newTestProvider(t, store)
@@ -492,6 +623,11 @@ func TestRevokeIdempotentSuccess(t *testing.T) {
 
 func newTestProvider(t *testing.T, store storage.Store) *oauth.Provider {
 	t.Helper()
+	return newTestProviderWithConfig(t, store, oauth.Config{})
+}
+
+func newTestProviderWithConfig(t *testing.T, store storage.Store, cfg oauth.Config) *oauth.Provider {
+	t.Helper()
 
 	keyStore := newMemoryKeyStore(t)
 	manager := keys.NewManager(keyStore)
@@ -499,13 +635,22 @@ func newTestProvider(t *testing.T, store storage.Store) *oauth.Provider {
 		t.Fatalf("EnsureSigningKey() error = %v", err)
 	}
 
+	cfg.Issuer = "https://mcp.example.test"
+	cfg.Secret = []byte("test-secret-must-be-32-bytes!!!!")
+	cfg.Store = store
+	cfg.KeyManager = manager
+	cfg.AllowedScopes = []string{"openid", "mcp.read", "mcp.write", "offline_access"}
+	cfg.DefaultScopes = []string{"openid", "mcp.read", "offline_access"}
 	provider, err := oauth.New(oauth.Config{
-		Issuer:        "https://mcp.example.test",
-		Secret:        []byte("test-secret-must-be-32-bytes!!!!"),
-		Store:         store,
-		KeyManager:    manager,
-		AllowedScopes: []string{"openid", "mcp.read", "mcp.write", "offline_access"},
-		DefaultScopes: []string{"openid", "mcp.read", "offline_access"},
+		Issuer:              cfg.Issuer,
+		Secret:              cfg.Secret,
+		Store:               cfg.Store,
+		KeyManager:          cfg.KeyManager,
+		AllowedScopes:       cfg.AllowedScopes,
+		DefaultScopes:       cfg.DefaultScopes,
+		AuditEmitter:        cfg.AuditEmitter,
+		RefreshReplayWindow: cfg.RefreshReplayWindow,
+		Now:                 cfg.Now,
 	})
 	if err != nil {
 		t.Fatalf("New() error = %v", err)
@@ -622,6 +767,39 @@ func decodeTokenField(t *testing.T, response *http.Response, field string) strin
 		t.Fatalf("token response missing %s: %#v", field, payload)
 	}
 	return value
+}
+
+func readResponseBody(t *testing.T, response *http.Response) string {
+	t.Helper()
+	defer func() { _ = response.Body.Close() }()
+	body, err := io.ReadAll(response.Body)
+	if err != nil {
+		t.Fatalf("read response body: %v", err)
+	}
+	return string(body)
+}
+
+type recordingAuditEmitter struct {
+	events []audit.Event
+}
+
+func (r *recordingAuditEmitter) Emit(_ context.Context, event audit.Event) error {
+	r.events = append(r.events, event)
+	return nil
+}
+
+func assertAuditEvent(t *testing.T, events []audit.Event, entityType string, action string, grantType string) {
+	t.Helper()
+	for _, event := range events {
+		if event.EntityType != entityType || event.Action != action {
+			continue
+		}
+		if event.Metadata["grant_type"] != grantType {
+			t.Fatalf("event %s/%s grant_type = %#v, want %q", entityType, action, event.Metadata["grant_type"], grantType)
+		}
+		return
+	}
+	t.Fatalf("missing audit event %s/%s grant_type=%s; events=%#v", entityType, action, grantType, events)
 }
 
 func noRedirectClient() *http.Client {
