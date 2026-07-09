@@ -12,6 +12,8 @@ import (
 	"github.com/ory/fosite"
 )
 
+const maxTokenFormBytes = 1 << 20
+
 // SubjectResolver returns the authenticated subject for an authorize request.
 type SubjectResolver func(r *http.Request) (Subject, error)
 
@@ -80,7 +82,13 @@ func (p *Provider) TokenHandler() http.Handler {
 			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 			return
 		}
+		r.Body = http.MaxBytesReader(w, r.Body, maxTokenFormBytes)
 		if err := r.ParseForm(); err != nil {
+			var maxBytesErr *http.MaxBytesError
+			if errors.As(err, &maxBytesErr) {
+				http.Error(w, "request body too large", http.StatusRequestEntityTooLarge)
+				return
+			}
 			http.Error(w, "invalid form", http.StatusBadRequest)
 			return
 		}

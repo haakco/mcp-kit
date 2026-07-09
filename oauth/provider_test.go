@@ -461,15 +461,18 @@ func TestRefreshTokenReplayWindowReturnsCachedRotation(t *testing.T) {
 
 	code := authorizeCode(t, server, "test-code-verifier-1234567890-must-be-at-least-43-characters-long", "state-123456")
 	tokenResponse := exchangeCode(t, server, code, "test-code-verifier-1234567890-must-be-at-least-43-characters-long")
+	defer func() { _ = tokenResponse.Body.Close() }()
 	refreshToken := decodeTokenField(t, tokenResponse, "refresh_token")
 
 	first := refreshTokenRequest(t, server.URL, refreshToken)
+	defer func() { _ = first.Body.Close() }()
 	firstBody := readResponseBody(t, first)
 	if first.StatusCode != http.StatusOK {
 		t.Fatalf("first refresh status = %d, want 200; body=%s", first.StatusCode, firstBody)
 	}
 
 	second := refreshTokenRequest(t, server.URL, refreshToken)
+	defer func() { _ = second.Body.Close() }()
 	secondBody := readResponseBody(t, second)
 	if second.StatusCode != http.StatusOK {
 		t.Fatalf("second refresh status = %d, want replay 200; body=%s", second.StatusCode, secondBody)
@@ -490,6 +493,7 @@ func TestRefreshTokenReplayWindowHandlesConcurrentReuse(t *testing.T) {
 
 	code := authorizeCode(t, server, "test-code-verifier-1234567890-must-be-at-least-43-characters-long", "state-123456")
 	tokenResponse := exchangeCode(t, server, code, "test-code-verifier-1234567890-must-be-at-least-43-characters-long")
+	defer func() { _ = tokenResponse.Body.Close() }()
 	refreshToken := decodeTokenField(t, tokenResponse, "refresh_token")
 
 	const attempts = 6
@@ -503,6 +507,7 @@ func TestRefreshTokenReplayWindowHandlesConcurrentReuse(t *testing.T) {
 			defer wg.Done()
 			<-start
 			response := refreshTokenRequest(t, server.URL, refreshToken)
+			defer func() { _ = response.Body.Close() }()
 			statuses[index] = response.StatusCode
 			bodies[index] = readResponseBody(t, response)
 		}(i)
@@ -533,9 +538,11 @@ func TestRefreshTokenReplayWindowExpires(t *testing.T) {
 
 	code := authorizeCode(t, server, "test-code-verifier-1234567890-must-be-at-least-43-characters-long", "state-123456")
 	tokenResponse := exchangeCode(t, server, code, "test-code-verifier-1234567890-must-be-at-least-43-characters-long")
+	defer func() { _ = tokenResponse.Body.Close() }()
 	refreshToken := decodeTokenField(t, tokenResponse, "refresh_token")
 
 	first := refreshTokenRequest(t, server.URL, refreshToken)
+	defer func() { _ = first.Body.Close() }()
 	firstBody := readResponseBody(t, first)
 	if first.StatusCode != http.StatusOK {
 		t.Fatalf("first refresh status = %d, want 200; body=%s", first.StatusCode, firstBody)
@@ -559,15 +566,18 @@ func TestTokenEndpointEmitsAuditEvents(t *testing.T) {
 
 	code := authorizeCode(t, server, "test-code-verifier-1234567890-must-be-at-least-43-characters-long", "state-123456")
 	tokenResponse := exchangeCode(t, server, code, "test-code-verifier-1234567890-must-be-at-least-43-characters-long")
+	defer func() { _ = tokenResponse.Body.Close() }()
 	refreshToken := decodeTokenField(t, tokenResponse, "refresh_token")
 
 	rotated := refreshTokenRequest(t, server.URL, refreshToken)
+	defer func() { _ = rotated.Body.Close() }()
 	refreshBody := readResponseBody(t, rotated)
 	if rotated.StatusCode != http.StatusOK {
 		t.Fatalf("refresh status = %d, want 200; body=%s", rotated.StatusCode, refreshBody)
 	}
 
 	reused := refreshTokenRequest(t, server.URL, refreshToken)
+	defer func() { _ = reused.Body.Close() }()
 	reuseBody := readResponseBody(t, reused)
 	if reused.StatusCode == http.StatusOK {
 		t.Fatalf("reuse unexpectedly succeeded; body=%s", reuseBody)
@@ -598,6 +608,34 @@ func TestTokenInvalidGrantEnvelopeOnPKCEFailure(t *testing.T) {
 	}
 	if _, ok := payload["error_description"].(string); !ok {
 		t.Fatalf("payload missing error_description: %#v", payload)
+	}
+}
+
+func TestTokenHandlerRejectsOversizedForm(t *testing.T) {
+	store := storage.NewMemoryStore()
+	provider := newTestProvider(t, store)
+	server := newOAuthTestServer(provider)
+	defer server.Close()
+
+	form := url.Values{
+		"grant_type": {"client_credentials"},
+		"client_id":  {strings.Repeat("a", 2<<20)},
+	}
+	request, err := http.NewRequest(http.MethodPost, server.URL+"/oauth/token", strings.NewReader(form.Encode()))
+	if err != nil {
+		t.Fatalf("new request: %v", err)
+	}
+	request.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+
+	response, err := http.DefaultClient.Do(request)
+	if err != nil {
+		t.Fatalf("POST token: %v", err)
+	}
+	defer func() { _ = response.Body.Close() }()
+
+	if response.StatusCode != http.StatusRequestEntityTooLarge {
+		body, _ := io.ReadAll(response.Body)
+		t.Fatalf("status = %d, want 413; body=%s", response.StatusCode, string(body))
 	}
 }
 
