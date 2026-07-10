@@ -7,6 +7,7 @@ import (
 	"errors"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/haakco/mcp-kit/audit"
 	"github.com/ory/fosite"
@@ -100,7 +101,7 @@ func (p *Provider) TokenHandler() http.Handler {
 			return
 		}
 
-		recorder := p.executeTokenRequest(ctx, r, grantType, clientID, false)
+		recorder := p.executeTokenRequest(ctx, r, grantType, clientID, false, nil)
 		writeReplay(w, recorder.replay())
 	})
 }
@@ -108,33 +109,46 @@ func (p *Provider) TokenHandler() http.Handler {
 func (p *Provider) handleReplayableRefresh(w http.ResponseWriter, r *http.Request, clientID string) {
 	refreshToken := r.PostForm.Get("refresh_token")
 	if refreshToken == "" {
-		recorder := p.executeTokenRequest(r.Context(), r, "refresh_token", clientID, false)
+		recorder := p.executeTokenRequest(r.Context(), r, "refresh_token", clientID, false, nil)
 		writeReplay(w, recorder.replay())
 		return
 	}
 	key := refreshReplayKey(clientID, refreshToken)
 	now := p.now().UTC()
-	if replay, ok := p.replayCache.get(key, now); ok {
+	if replay, ok := p.replayCache.replay(key, now); ok {
 		writeReplay(w, replay)
-		p.emitTokenAudit(r.Context(), "oauth_refresh", "replayed", nil, "refresh_token", clientID, nil, true)
+		p.emitRefreshReplayAudit(r.Context(), clientID, key, replay, now)
 		return
 	}
 
+	owner := new(int)
 	value, _, _ := p.replayCache.group.Do(key, func() (any, error) {
-		if replay, ok := p.replayCache.get(key, p.now().UTC()); ok {
-			return replay, nil
+		if replay, ok := p.replayCache.replay(key, p.now().UTC()); ok {
+			return refreshReplayOutcome{response: replay, owner: owner, isReplay: true}, nil
 		}
-		recorder := p.executeTokenRequest(r.Context(), r, "refresh_token", clientID, false)
+		rotationAt := p.now().UTC()
+		metadata := p.refreshAuditMetadata(key)
+		metadata["rotation_at"] = rotationAt.Format(time.RFC3339Nano)
+		recorder := p.executeTokenRequest(r.Context(), r, "refresh_token", clientID, false, metadata)
 		replay := recorder.replay()
-		p.storeRefreshReplay(clientID, refreshToken, replay)
-		return replay, nil
+		p.storeRefreshReplay(key, replay, rotationAt)
+		return refreshReplayOutcome{response: replay, owner: owner}, nil
 	})
-	replay, ok := value.(replayedTokenResponse)
-	if !ok || replay.status == 0 {
+	outcome, ok := value.(refreshReplayOutcome)
+	if !ok || outcome.response.status == 0 {
 		http.Error(w, "token exchange failed", http.StatusInternalServerError)
 		return
 	}
-	writeReplay(w, replay)
+	if outcome.owner == owner && outcome.isReplay {
+		p.emitRefreshReplayAudit(r.Context(), clientID, key, outcome.response, now)
+	} else if outcome.owner != owner {
+		replay, found := p.replayCache.replay(key, now)
+		if found {
+			outcome.response = replay
+			p.emitRefreshReplayAudit(r.Context(), clientID, key, replay, now)
+		}
+	}
+	writeReplay(w, outcome.response)
 }
 
 func (p *Provider) executeTokenRequest(
@@ -143,11 +157,12 @@ func (p *Provider) executeTokenRequest(
 	grantType string,
 	clientID string,
 	replayed bool,
+	metadata map[string]any,
 ) *tokenResponseRecorder {
 	recorder := newTokenResponseRecorder()
 	requester, err := p.oauth.NewAccessRequest(ctx, r, NewEmptySession())
 	if err != nil {
-		p.emitTokenAudit(ctx, "oauth_token_exchange", "failed", requester, grantType, clientID, err, replayed)
+		p.emitTokenAudit(ctx, "oauth_token_exchange", "failed", requester, grantType, clientID, err, replayed, metadata)
 		p.oauth.WriteAccessError(ctx, recorder, requester, err)
 		return recorder
 	}
@@ -156,32 +171,54 @@ func (p *Provider) executeTokenRequest(
 
 	response, err := p.oauth.NewAccessResponse(ctx, requester)
 	if err != nil {
-		p.emitTokenAudit(ctx, "oauth_token_exchange", "failed", requester, grantType, clientID, err, replayed)
+		p.emitTokenAudit(ctx, "oauth_token_exchange", "failed", requester, grantType, clientID, err, replayed, metadata)
 		p.oauth.WriteAccessError(ctx, recorder, requester, err)
 		return recorder
 	}
 	p.oauth.WriteAccessResponse(ctx, recorder, requester, response)
 	if grantType == "refresh_token" {
-		p.emitTokenAudit(ctx, "oauth_refresh", "rotated", requester, grantType, clientID, nil, replayed)
+		p.emitTokenAudit(ctx, "oauth_refresh", "rotated", requester, grantType, clientID, nil, replayed, metadata)
 	} else {
-		p.emitTokenAudit(ctx, "oauth_token", "issued", requester, grantType, clientID, nil, replayed)
+		p.emitTokenAudit(ctx, "oauth_token", "issued", requester, grantType, clientID, nil, replayed, metadata)
 	}
 	return recorder
 }
 
-func (p *Provider) storeRefreshReplay(clientID string, refreshToken string, replay replayedTokenResponse) {
+func (p *Provider) storeRefreshReplay(key string, replay replayedTokenResponse, rotationAt time.Time) {
 	if replay.status < http.StatusOK || replay.status >= http.StatusMultipleChoices {
 		return
 	}
-	if refreshToken == "" {
-		return
-	}
-	p.replayCache.set(refreshReplayKey(clientID, refreshToken), replayedTokenResponse{
+	p.replayCache.set(key, replayedTokenResponse{
 		body:      replay.body,
 		header:    replay.header,
 		status:    replay.status,
-		expiresAt: p.now().UTC().Add(p.replayWindow),
+		rotatedAt: rotationAt,
+		expiresAt: rotationAt.Add(p.replayWindow),
 	})
+}
+
+func (p *Provider) emitRefreshReplayAudit(
+	ctx context.Context,
+	clientID string,
+	key string,
+	replay replayedTokenResponse,
+	now time.Time,
+) {
+	metadata := p.refreshAuditMetadata(key)
+	metadata["rotation_at"] = replay.rotatedAt.Format(time.RFC3339Nano)
+	metadata["first_replay_at"] = replay.firstReplayAt.Format(time.RFC3339Nano)
+	metadata["replay_age_seconds"] = int64(now.Sub(replay.rotatedAt) / time.Second)
+	metadata["replay_count"] = replay.replayCount
+	metadata["cache_response_returned"] = true
+	p.emitTokenAudit(ctx, "oauth_refresh", "replayed", nil, "refresh_token", clientID, nil, true, metadata)
+}
+
+func (p *Provider) refreshAuditMetadata(key string) map[string]any {
+	return map[string]any{
+		"refresh_token_fingerprint": key[:32],
+		"replay_window_seconds":     int64(p.replayWindow / time.Second),
+		"cache_response_returned":   false,
+	}
 }
 
 func writeReplay(w http.ResponseWriter, replay replayedTokenResponse) {
@@ -203,6 +240,7 @@ func (p *Provider) emitTokenAudit(
 	clientID string,
 	err error,
 	replayed bool,
+	extraMetadata map[string]any,
 ) {
 	if p.auditEmitter == nil {
 		return
@@ -227,6 +265,9 @@ func (p *Provider) emitTokenAudit(
 	}
 	if err != nil {
 		event.Metadata["error_code"] = oauthErrorCode(err)
+	}
+	for key, value := range extraMetadata {
+		event.Metadata[key] = value
 	}
 	_ = p.auditEmitter.Emit(ctx, event) //nolint:errcheck // audit is non-blocking for token endpoint availability
 }

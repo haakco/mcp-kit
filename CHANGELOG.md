@@ -8,6 +8,11 @@ The module is pre-1.0. Breaking API changes are allowed between minor versions a
 
 ### Added
 
+- Refresh-token rotation, replay, and failed-exchange audit events now include a
+  non-reversible token fingerprint. Replay events also include rotation time,
+  first replay time, replay age/count, configured window, and whether the
+  cached response was returned, allowing consumers to measure stale-token use
+  without recording token values.
 - `oauth.DefaultAccessTokenLifespan` and `oauth.DefaultRefreshTokenLifespan` constants, now used by `oauth.Config` defaults. Access tokens default to 1 hour to limit stale-token windows; refresh tokens default to 30 days and continue to rotate on use.
 - `oauth.BearerConfig.RequiredScopes`, which enforces required bearer scopes while preserving `resource_metadata` on 401 challenges and adding `scope="..."` only on 403 insufficient-scope challenges.
 - `resource_name` support in OAuth/OIDC protected-resource metadata helpers.

@@ -146,6 +146,15 @@ For a protected resource at `/mcp`, the canonical RFC 9728 metadata URL is `/.we
 
 When storing Fosite sessions, persist the expiry that matches the session type. Refresh-token rows should use `fosite.RefreshToken`, not `fosite.AccessToken`, or stores that enforce row expiry can delete refresh sessions when the short access token expires. This makes "lower the access-token TTL so clients refresh sooner" backfire by removing the refresh path.
 
+### OG-10 - Rotated refresh-token reuse needs correlation, not token logging
+
+Clients can continue presenting a rotated refresh token long after a successful
+exchange. Emit a truncated hash fingerprint for the presented token on rotation,
+cached replay, and failed refresh events so consumers can reconstruct the full
+timeline without storing token values. Audit every request, including followers
+coalesced behind `singleflight`; otherwise concurrent stale-token use is silently
+undercounted.
+
 ## JSON-RPC Envelope Traps
 
 ### JR-01 - Echo request IDs exactly

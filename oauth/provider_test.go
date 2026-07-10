@@ -484,7 +484,9 @@ func TestRefreshTokenReplayWindowReturnsCachedRotation(t *testing.T) {
 
 func TestRefreshTokenReplayWindowHandlesConcurrentReuse(t *testing.T) {
 	store := storage.NewMemoryStore()
+	emitter := &recordingAuditEmitter{}
 	provider := newTestProviderWithConfig(t, store, oauth.Config{
+		AuditEmitter:        emitter,
 		RefreshReplayWindow: 5 * time.Minute,
 	})
 	savePKCEClient(t, store)
@@ -523,6 +525,10 @@ func TestRefreshTokenReplayWindowHandlesConcurrentReuse(t *testing.T) {
 			t.Fatalf("refresh attempt %d body changed\nfirst: %s\n got:  %s", i, bodies[0], bodies[i])
 		}
 	}
+	events := emitter.snapshot()
+	if got := countAuditEvents(events, "oauth_refresh", "replayed"); got != attempts-1 {
+		t.Fatalf("replayed audit event count = %d, want %d (one per stale-token request); events=%#v", got, attempts-1, events)
+	}
 }
 
 func TestRefreshTokenReplayWindowExpires(t *testing.T) {
@@ -554,6 +560,99 @@ func TestRefreshTokenReplayWindowExpires(t *testing.T) {
 	if reused.StatusCode == http.StatusOK {
 		t.Fatal("expired replay window accepted stale refresh token")
 	}
+}
+
+func TestRefreshTokenReplayAuditMetadata(t *testing.T) {
+	store := storage.NewMemoryStore()
+	emitter := &recordingAuditEmitter{}
+	now := time.Date(2026, 7, 10, 10, 0, 0, 0, time.UTC)
+	provider := newTestProviderWithConfig(t, store, oauth.Config{
+		AuditEmitter:        emitter,
+		RefreshReplayWindow: 2 * time.Hour,
+		Now:                 func() time.Time { return now },
+	})
+	savePKCEClient(t, store)
+	server := newOAuthTestServer(provider)
+	defer server.Close()
+
+	code := authorizeCode(t, server, "test-code-verifier-1234567890-must-be-at-least-43-characters-long", "state-123456")
+	tokenResponse := exchangeCode(t, server, code, "test-code-verifier-1234567890-must-be-at-least-43-characters-long")
+	refreshToken := decodeTokenField(t, tokenResponse, "refresh_token")
+
+	rotated := refreshTokenRequest(t, server.URL, refreshToken)
+	if body := readResponseBody(t, rotated); rotated.StatusCode != http.StatusOK {
+		t.Fatalf("refresh status = %d, want 200; body=%s", rotated.StatusCode, body)
+	}
+	now = now.Add(15 * time.Minute)
+	firstReplay := refreshTokenRequest(t, server.URL, refreshToken)
+	if body := readResponseBody(t, firstReplay); firstReplay.StatusCode != http.StatusOK {
+		t.Fatalf("first replay status = %d, want 200; body=%s", firstReplay.StatusCode, body)
+	}
+	now = now.Add(45 * time.Minute)
+	secondReplay := refreshTokenRequest(t, server.URL, refreshToken)
+	if body := readResponseBody(t, secondReplay); secondReplay.StatusCode != http.StatusOK {
+		t.Fatalf("second replay status = %d, want 200; body=%s", secondReplay.StatusCode, body)
+	}
+
+	rotatedEvent := findAuditEvent(t, emitter.events, "oauth_refresh", "rotated")
+	firstReplayEvent := findNthAuditEvent(t, emitter.events, "oauth_refresh", "replayed", 0)
+	secondReplayEvent := findNthAuditEvent(t, emitter.events, "oauth_refresh", "replayed", 1)
+	fingerprint, ok := rotatedEvent.Metadata["refresh_token_fingerprint"].(string)
+	if !ok || len(fingerprint) != 32 {
+		t.Fatalf("refresh_token_fingerprint = %#v, want 32 hex characters", rotatedEvent.Metadata["refresh_token_fingerprint"])
+	}
+	if firstReplayEvent.Metadata["refresh_token_fingerprint"] != fingerprint ||
+		secondReplayEvent.Metadata["refresh_token_fingerprint"] != fingerprint {
+		t.Fatal("refresh audit events do not share a stable token fingerprint")
+	}
+	assertMetadataEqual(t, firstReplayEvent, "replay_age_seconds", int64(15*60))
+	assertMetadataEqual(t, firstReplayEvent, "replay_count", int64(1))
+	assertMetadataEqual(t, secondReplayEvent, "replay_age_seconds", int64(60*60))
+	assertMetadataEqual(t, secondReplayEvent, "replay_count", int64(2))
+	assertMetadataEqual(t, secondReplayEvent, "replay_window_seconds", int64(2*60*60))
+	assertMetadataEqual(t, secondReplayEvent, "cache_response_returned", true)
+	if firstReplayEvent.Metadata["first_replay_at"] != secondReplayEvent.Metadata["first_replay_at"] {
+		t.Fatal("first_replay_at changed between replay events")
+	}
+	encoded, err := json.Marshal(emitter.events)
+	if err != nil {
+		t.Fatalf("marshal audit events: %v", err)
+	}
+	if strings.Contains(string(encoded), refreshToken) {
+		t.Fatal("audit metadata contains the raw refresh token")
+	}
+}
+
+func TestRefreshTokenFailureAuditIncludesFingerprintAfterReplayWindow(t *testing.T) {
+	store := storage.NewMemoryStore()
+	emitter := &recordingAuditEmitter{}
+	now := time.Date(2026, 7, 10, 10, 0, 0, 0, time.UTC)
+	provider := newTestProviderWithConfig(t, store, oauth.Config{
+		AuditEmitter:        emitter,
+		RefreshReplayWindow: 2 * time.Hour,
+		Now:                 func() time.Time { return now },
+	})
+	savePKCEClient(t, store)
+	server := newOAuthTestServer(provider)
+	defer server.Close()
+
+	code := authorizeCode(t, server, "test-code-verifier-1234567890-must-be-at-least-43-characters-long", "state-123456")
+	tokenResponse := exchangeCode(t, server, code, "test-code-verifier-1234567890-must-be-at-least-43-characters-long")
+	refreshToken := decodeTokenField(t, tokenResponse, "refresh_token")
+	rotated := refreshTokenRequest(t, server.URL, refreshToken)
+	_ = readResponseBody(t, rotated)
+	rotation := findAuditEvent(t, emitter.events, "oauth_refresh", "rotated")
+
+	now = now.Add(2*time.Hour + time.Second)
+	failed := refreshTokenRequest(t, server.URL, refreshToken)
+	if body := readResponseBody(t, failed); failed.StatusCode == http.StatusOK {
+		t.Fatalf("expired replay unexpectedly succeeded; body=%s", body)
+	}
+	failure := findAuditEvent(t, emitter.events, "oauth_token_exchange", "failed")
+	if failure.Metadata["refresh_token_fingerprint"] != rotation.Metadata["refresh_token_fingerprint"] {
+		t.Fatal("failed stale refresh cannot be correlated with its rotation")
+	}
+	assertMetadataEqual(t, failure, "cache_response_returned", false)
 }
 
 func TestTokenEndpointEmitsAuditEvents(t *testing.T) {
@@ -818,12 +917,31 @@ func readResponseBody(t *testing.T, response *http.Response) string {
 }
 
 type recordingAuditEmitter struct {
+	mu     sync.Mutex
 	events []audit.Event
 }
 
 func (r *recordingAuditEmitter) Emit(_ context.Context, event audit.Event) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
 	r.events = append(r.events, event)
 	return nil
+}
+
+func (r *recordingAuditEmitter) snapshot() []audit.Event {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return append([]audit.Event{}, r.events...)
+}
+
+func countAuditEvents(events []audit.Event, entityType string, action string) int {
+	count := 0
+	for _, event := range events {
+		if event.EntityType == entityType && event.Action == action {
+			count++
+		}
+	}
+	return count
 }
 
 func assertAuditEvent(t *testing.T, events []audit.Event, entityType string, action string, grantType string) {
@@ -838,6 +956,33 @@ func assertAuditEvent(t *testing.T, events []audit.Event, entityType string, act
 		return
 	}
 	t.Fatalf("missing audit event %s/%s grant_type=%s; events=%#v", entityType, action, grantType, events)
+}
+
+func findAuditEvent(t *testing.T, events []audit.Event, entityType string, action string) audit.Event {
+	t.Helper()
+	return findNthAuditEvent(t, events, entityType, action, 0)
+}
+
+func findNthAuditEvent(t *testing.T, events []audit.Event, entityType string, action string, index int) audit.Event {
+	t.Helper()
+	for _, event := range events {
+		if event.EntityType != entityType || event.Action != action {
+			continue
+		}
+		if index == 0 {
+			return event
+		}
+		index--
+	}
+	t.Fatalf("missing audit event %s/%s at index %d", entityType, action, index)
+	return audit.Event{}
+}
+
+func assertMetadataEqual(t *testing.T, event audit.Event, key string, want any) {
+	t.Helper()
+	if got := event.Metadata[key]; got != want {
+		t.Fatalf("event %s/%s metadata[%q] = %#v, want %#v", event.EntityType, event.Action, key, got, want)
+	}
 }
 
 func noRedirectClient() *http.Client {

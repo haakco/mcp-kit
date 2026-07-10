@@ -115,10 +115,19 @@ func scopeSet(scopes []string) map[string]struct{} {
 }
 
 type replayedTokenResponse struct {
-	body      []byte
-	header    http.Header
-	status    int
-	expiresAt time.Time
+	body          []byte
+	header        http.Header
+	status        int
+	rotatedAt     time.Time
+	firstReplayAt time.Time
+	replayCount   int64
+	expiresAt     time.Time
+}
+
+type refreshReplayOutcome struct {
+	response replayedTokenResponse
+	owner    *int
+	isReplay bool
 }
 
 type refreshReplayCache struct {
@@ -136,7 +145,7 @@ func refreshReplayKey(clientID string, refreshToken string) string {
 	return hex.EncodeToString(sum[:])
 }
 
-func (c *refreshReplayCache) get(key string, now time.Time) (replayedTokenResponse, bool) {
+func (c *refreshReplayCache) replay(key string, now time.Time) (replayedTokenResponse, bool) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
@@ -148,6 +157,11 @@ func (c *refreshReplayCache) get(key string, now time.Time) (replayedTokenRespon
 		delete(c.entries, key)
 		return replayedTokenResponse{}, false
 	}
+	if entry.firstReplayAt.IsZero() {
+		entry.firstReplayAt = now
+	}
+	entry.replayCount++
+	c.entries[key] = entry
 	return cloneReplayedResponse(entry), true
 }
 
