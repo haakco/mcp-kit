@@ -577,19 +577,23 @@ func TestRefreshTokenReplayAuditMetadata(t *testing.T) {
 
 	code := authorizeCode(t, server, "test-code-verifier-1234567890-must-be-at-least-43-characters-long", "state-123456")
 	tokenResponse := exchangeCode(t, server, code, "test-code-verifier-1234567890-must-be-at-least-43-characters-long")
+	defer func() { _ = tokenResponse.Body.Close() }()
 	refreshToken := decodeTokenField(t, tokenResponse, "refresh_token")
 
 	rotated := refreshTokenRequest(t, server.URL, refreshToken)
+	defer func() { _ = rotated.Body.Close() }()
 	if body := readResponseBody(t, rotated); rotated.StatusCode != http.StatusOK {
 		t.Fatalf("refresh status = %d, want 200; body=%s", rotated.StatusCode, body)
 	}
 	now = now.Add(15 * time.Minute)
 	firstReplay := refreshTokenRequest(t, server.URL, refreshToken)
+	defer func() { _ = firstReplay.Body.Close() }()
 	if body := readResponseBody(t, firstReplay); firstReplay.StatusCode != http.StatusOK {
 		t.Fatalf("first replay status = %d, want 200; body=%s", firstReplay.StatusCode, body)
 	}
 	now = now.Add(45 * time.Minute)
 	secondReplay := refreshTokenRequest(t, server.URL, refreshToken)
+	defer func() { _ = secondReplay.Body.Close() }()
 	if body := readResponseBody(t, secondReplay); secondReplay.StatusCode != http.StatusOK {
 		t.Fatalf("second replay status = %d, want 200; body=%s", secondReplay.StatusCode, body)
 	}
@@ -638,13 +642,16 @@ func TestRefreshTokenFailureAuditIncludesFingerprintAfterReplayWindow(t *testing
 
 	code := authorizeCode(t, server, "test-code-verifier-1234567890-must-be-at-least-43-characters-long", "state-123456")
 	tokenResponse := exchangeCode(t, server, code, "test-code-verifier-1234567890-must-be-at-least-43-characters-long")
+	defer func() { _ = tokenResponse.Body.Close() }()
 	refreshToken := decodeTokenField(t, tokenResponse, "refresh_token")
 	rotated := refreshTokenRequest(t, server.URL, refreshToken)
+	defer func() { _ = rotated.Body.Close() }()
 	_ = readResponseBody(t, rotated)
 	rotation := findAuditEvent(t, emitter.events, "oauth_refresh", "rotated")
 
 	now = now.Add(2*time.Hour + time.Second)
 	failed := refreshTokenRequest(t, server.URL, refreshToken)
+	defer func() { _ = failed.Body.Close() }()
 	if body := readResponseBody(t, failed); failed.StatusCode == http.StatusOK {
 		t.Fatalf("expired replay unexpectedly succeeded; body=%s", body)
 	}
