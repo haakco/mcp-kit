@@ -15,7 +15,7 @@ jobs:
     name: Quality
     runs-on: haakco-build
     container:
-      image: ghcr.io/haakco/actions-runner:1
+      image: ghcr.io/haakco/actions-runner:2
       credentials:
         username: ${{ github.actor }}
         password: ${{ secrets.GITHUB_TOKEN }}
