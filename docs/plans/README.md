@@ -6,6 +6,7 @@ Active and archived implementation plans for `mcp-kit`.
 
 | Plan | Status | Goal |
 |---|---|---|
+| [2026-09-25_mcp-2026-07-28-protocol-migration.md](2026-09-25_mcp-2026-07-28-protocol-migration.md) | Draft | Move the kit onto MCP protocol revision 2026-07-28: go-sdk v1.8.0, stateless Streamable HTTP, `server/discover`, real SDK-backed test fixtures in place of the fabricated `2025-03-26` ones, the new error-code partition, and the OAuth changes (`iss`, `application_type`, Client ID Metadata Documents) |
 | [2026-07-06_aoa_security_conformance_hardening.md](2026-07-06_aoa_security_conformance_hardening.md) | Draft | Borrow useful security and conformance patterns from `aoa`/`aoa-conformance` without replacing `mcp-kit`'s OAuth issuer and middleware architecture |
 | [2026-05-01_mcp-kit_master_plan.md](2026-05-01_mcp-kit_master_plan.md) | Draft (v0.1.0 spike landed; awaiting review) | Take mcp-kit from v0.1.0 skeleton to v1.0.0 stable across three Go consumers (skills-mcp, vorrent, meridian) |
 
