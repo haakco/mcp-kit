@@ -519,16 +519,23 @@ Fill this during delivery; never turn planned commands into claimed evidence.
 
 | Boundary | Commit/version | Local proof | CI | Hosted/deployed proof |
 |---|---|---|---|---|
-| mcp-kit release candidate | branch `feat/mcp-2026-07-28-migration` (SHA recorded on push) | `just build`, `just test`, `just test-race`, `just vet`, `just lint-go` (0 issues), `just vulncheck` (clean), `just conformance` (CLI `0.2.0-alpha.11`, `--requirements 2026-07-28`, 164 passed / 0 failed scored, 0 baseline entries), negative control `-stateless=false` exits 1, `git diff --check` clean | Not run — branch not pushed | n/a |
+| mcp-kit release candidate | `8101108` (migration) + `9973cf3` (CI fix) on `feat/mcp-2026-07-28-migration`; PR [#5](https://github.com/haakco/mcp-kit/pull/5) | `just quality` (build, vet, deep lint 0 issues, structural lint 0 issues, race — 13 packages), `just vulncheck` (no vulnerabilities), `just conformance` (CLI `0.2.0-alpha.11`, `--requirements 2026-07-28`, 164 passed / 0 failed scored, 0 baseline entries), negative control `-stateless=false` exits 1, `actionlint` clean, suite-selection logic verified under `/bin/dash`, `git diff --check` clean | **Green** on run [36123660998](https://github.com/haakco/mcp-kit/actions/runs/36123660998): Detect changes pass, Quality pass (4m55s), Conformance pass (1m54s), GitGuardian pass. First run failed and correctly skipped the suites; root cause was `set -o pipefail` under dash, fixed in `9973cf3`. | n/a |
 | skills-mcp candidate | — | — | — | — |
 | mcp-kit v0.6.0 | — | — | — | module/tag fetch — |
 | skills-mcp v0.6.0 | — | — | — | — |
 | vorrent v0.6.0 | — | — | — | — |
 
+Dependabot: all 7 open alerts on `main` (2 high, 1 moderate, 4 low) are addressed on the branch — `grpc`
+v1.82.1 → v1.83.1 and `otel` v1.43.0 → v1.46.0. GitHub re-evaluates the default branch only after the change lands,
+so confirmation is pending merge.
+
 Dependency versions resolved for the candidate: Go `1.27.1`, MCP Go SDK `v1.8.0`,
-`github.com/go-jose/go-jose/v4 v4.1.5`, `golangci-lint v2.14.0`, `golang.org/x/crypto v0.57.0`,
-`golang.org/x/oauth2 v0.37.0`, `golang.org/x/sync v0.23.0`, `govulncheck v1.8.0`, conformance CLI `0.2.0-alpha.11`.
+`github.com/go-jose/go-jose/v4 v4.1.5`, `golangci-lint v2.14.0`, `google.golang.org/grpc v1.83.1`,
+`go.opentelemetry.io/otel v1.46.0`, `golang.org/x/crypto v0.57.0`, `golang.org/x/oauth2 v0.37.0`,
+`golang.org/x/sync v0.23.0`, `govulncheck v1.8.0`, conformance CLI `0.2.0-alpha.11`.
 `entgo.io/ent` and `github.com/ory/fosite` were already at their latest releases.
+
+Note for local setup: editing `mise.toml` makes mise treat the config as untrusted until `mise trust` is run once.
 
 Record blockers with the exact failed command or external state. A local pass does not substitute for CI, tag,
 dependency resolution, deployment, or hosted acceptance.
