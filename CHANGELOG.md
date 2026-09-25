@@ -32,6 +32,10 @@ behaviour.
 longer breaks the `WWW-Authenticate` header structure.
 - **Dependency majors:** `github.com/go-jose/go-jose/v3` → `v4`, `github.com/modelcontextprotocol/go-sdk` v1.6.1 →
 v1.8.0, `golangci-lint` v2.12.2 → v2.14.0, plus current `golang.org/x/*`.
+- **Cleared every open Dependabot alert on the module graph.** `google.golang.org/grpc` v1.82.1 → v1.83.1 fixes two
+high-severity and one moderate alert; `go.opentelemetry.io/otel` and its OTLP/Zipkin exporters v1.43.0 → v1.46.0 fix
+four low-severity alerts. `govulncheck` already reported no reachable vulnerabilities; this clears the alerts that
+exist regardless of reachability.
 
 ### Migration
 
