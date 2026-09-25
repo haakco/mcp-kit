@@ -98,6 +98,9 @@ are all part of the 2026-07-28 requirement set. |
 | Task 2 files list `mcpkit/errors.go`. | No such file exists; `ErrNotImplemented` lived in `mcpkit/server.go`. | Removed from there. |
 | Decision 3 implies removing all dead config fields. | `mcpkit.Config.Validator` is dead by documentation but still used by ~12 `skills-mcp` test call sites. | Kept `Validator` (it still works via `Bearer.TokenValidator`); removing it is follow-up work, not migration scope. |
 | Task 3: the Envelope middleware rewrites SDK plain-text protocol errors. | Against v1.8.0 the SDK returns proper JSON-RPC for every case the rewrite table names (`-32700`, `-32600`, `-32601`), so those rules are unreachable for SDK-backed handlers. | Kept the middleware and its rules as a safety net for non-SDK handlers, proved pass-through at the wire level, and recorded the observation rather than silently refactoring a public middleware. |
+| Task 10's vorrent file list implies `internal/mcpserver/server.go` and CORS are the only source changes. | The upgrade also changed the bearer challenge realm: kit `7d3ed47` moved `Bearer realm="mcp-kit"` to the interoperable `realm="OAuth"`, first shipped in v0.5.10. vorrent pinned v0.5.8, so its `TestRegisterMCPIfEnabled_UsesKitBearerChallenge` passed on main and failed on the upgrade. | The CHANGELOG recorded it but the migration notes did not. Added as required change #11 plus a gotcha in `docs/migration/vorrent.md`; vorrent's assertion now follows the kit. `skills-mcp` never asserted the realm, so it was unaffected. |
+| Task 10 treats vorrent's `go build ./...` and lint gate as working baselines to preserve. | Neither was working. `go build ./...` failed on main because commit `cd2ebe6c` pinned `go-diskfs => v1.7.0` for rclone v1.73.5 while the tree had moved to rclone v1.75.0, whose squashfs backend needs v1.9.x. Separately, raising the `go` directive forces `go mod tidy` to resolve golangci-lint v2.11.4 → v2.14.0 (v2.11.4 cannot decode Go 1.27 export data), and the newer analyzers then flag 8 pre-existing findings in untouched code. | Dropped the stale replace and resolved all 8 findings, including a real path-traversal in `parseHLSRequestPath` and a pointer-formatting bug in the audit summary. Both are verified pre-existing: a worktree of vorrent `main` fails identically under Go 1.26.8 and Go 1.27.1. |
+| A consumer's focused/fast lane is sufficient local proof of a kit upgrade. | `just test-backend-fast` passes with vorrent's stale `realm="mcp-kit"` assertion; only the full `internal/api` suite catches it. The fast lane ran 63 tests in 4.2s and skips the DB-backed set. | Consumer proof for Tasks 8 and 10 uses the full suite for the touched packages, not the fast lane alone. |
 
 ---
 
@@ -428,19 +431,41 @@ git diff --check
 **Likely files:** `apps/skills-mcp/go.mod`, `go.sum`, `internal/server/server.go`, server tests,
 `internal/web/cors.go`, auth/API helpers, and live MCP docs.
 
-- [ ] Re-read nearest AGENTS files and verify a clean worktree.
-- [ ] Use `go get github.com/haakco/mcp-kit@<task-7-sha>` to obtain the exact pseudo-version. Never commit a local
-      filesystem `replace`. Upgrade the direct SDK dependency to v1.8.0.
-- [ ] Restrict HTTP and stdio servers to 2026-07-28; set explicit empty capabilities and cache policy. Use `private`
-      for authenticated/caller-varying results.
-- [ ] Set HTTP `Stateless: true`; remove session/initialize assumptions from tests and helpers.
-- [ ] Allow `Mcp-Protocol-Version`, `Mcp-Method`, and `Mcp-Name` through CORS; allow `Mcp-Param-*` only if used. Stop
-      exposing `Mcp-Session-Id`.
-- [ ] Update challenge expectations, metadata, live runbook, and migration notes.
-- [ ] Run repository-defined focused/boundary suites plus official conformance.
+- [x] Re-read nearest AGENTS files and verify a clean worktree. Branch `feat/mcp-2026-07-28-migration` from `f8624a5d`.
+- [x] Use `go get github.com/haakco/mcp-kit@<task-7-sha>` to obtain the exact pseudo-version. Never commit a local
+      filesystem `replace`. Upgrade the direct SDK dependency to v1.8.0. Done: `v0.5.14-0.20260925102941-07980ed9c9da`
+      and SDK `v1.8.0`; the only `replace` in `go.mod` is the pre-existing unrelated `clipperhouse/displaywidth` pin.
+- [x] Restrict HTTP and stdio servers to 2026-07-28; set explicit empty capabilities and cache policy. Use `private`
+      for authenticated/caller-varying results. Done in `internal/server/server.go` and `cmd/skills/mcp_server.go`:
+      `SupportedProtocolVersions`, `Capabilities: &mcp.ServerCapabilities{}`, `SetCacheable: PrivateCache(DefaultCacheTTL)`.
+- [x] Set HTTP `Stateless: true`; remove session/initialize assumptions from tests and helpers. Done. The helpers were
+      worse than assumed: `postMCP` sent no per-request `_meta` and used a 2025-11-25 header, so the suite was
+      exercising the SDK legacy compatibility path. Both request helpers now send `_meta` plus `Mcp-Protocol-Version`,
+      `Mcp-Method`, and `Mcp-Name`; the session idiom is gone from 21 helpers across 9 files, and `mcpInit` now proves
+      `server/discover` returns exactly `[2026-07-28]`.
+- [x] Allow `Mcp-Protocol-Version`, `Mcp-Method`, and `Mcp-Name` through CORS; allow `Mcp-Param-*` only if used. Stop
+      exposing `Mcp-Session-Id`. Done in `internal/web/cors.go` (`Mcp-Param-*` unused, so not added).
+- [x] Update challenge expectations, metadata, live runbook, and migration notes. `internal/web/cors_test.go` was
+      rewritten from the session-header assertion into three modern-wire assertions; `TestAPI_InitializeCapabilities`
+      became `TestAPI_DiscoverCapabilities`, which also pins `cacheScope: private` and a positive `ttlMs`.
+- [x] Run repository-defined focused/boundary suites plus official conformance. Suites: `check-go-structure.sh` clean,
+      `gofmt` clean, and **full** `SKILLS_TEST_POSTGRES_URL=... go test -p 1 ./... -count=1` green. Postgres 18 was
+      provisioned locally on `127.0.0.1:15432`, the port `apps/skills-mcp/mise.toml` documents. This matters: without
+      a database the DB-backed `internal/server` suite skips and reports a meaningless pass. Conformance against
+      skills-mcp was **not** run (see the note below the checklist).
 - [ ] With owner approval, deploy and run authenticated `server/discover` plus `tools/list`. Redefine PR-02 around
-      this stateless path.
-- [ ] Commit and push only after local proof. Record commit, CI, deployment, and hosted probe separately.
+      this stateless path. **Blocked on owner approval to deploy.**
+- [x] Commit and push only after local proof. Record commit, CI, deployment, and hosted probe separately. Pushed
+      `83ee190a` to `feat/mcp-2026-07-28-migration`. CI not yet observed for this branch.
+
+Two environment facts worth recording, because both cost real time to rediscover:
+
+- The repo pins `go = "1.26"` and `golangci-lint = "2.11.3"` in `mise.toml`, but `apps/skills-mcp/go.mod` declares
+  `go 1.27.0` and has done since before this migration. The mise-pinned linter therefore cannot lint this module at
+  all. `golangci-lint 2.14.0` works and reports 7 gosec findings (`G710` open redirect, `G124` cookie attributes) in
+  files this migration does not touch, so they are pre-existing and were reported rather than folded in.
+- `task` is not installed in this environment, so `just lint-go` cannot run; `golangci-lint run` and
+  `tooling/scripts/check-go-structure.sh .` were run directly instead.
 
 **Gate:** SDK reports 2026-07-28, no session header appears, discover/tools-list conform, invalid tokens recover via
 advertised metadata, and the hosted service remains healthy.
@@ -466,16 +491,39 @@ advertised metadata, and the hosted service remains healthy.
 **Likely files:** `go.mod`, `go.sum`, `internal/mcpserver/server.go`, `internal/api/http_helpers.go`,
 `internal/api/http_server.go`, MCP tests, and live docs.
 
-- [ ] Re-read nearest AGENTS files and verify a clean worktree.
-- [ ] Upgrade `mcp-kit` to v0.6.0 and SDK to v1.8.0.
-- [ ] Remove deleted `DisableLocalhostProtection`. Preserve the kit's explicit Origin policy; do not weaken
-      localhost/DNS-rebinding protection to pass tests.
-- [ ] Apply modern-only options, stateless handler, explicit capabilities/cache policy, CORS headers, and
-      session-free tests as in skills-mcp.
-- [ ] Update live docs and PR-02-style probes; preserve archived plans as history.
-- [ ] Run repository-defined focused/boundary suites and official conformance.
-- [ ] Commit and push after local proof. With owner approval, deploy and run authenticated discover/tools-list and
-      OAuth recovery. Record commit, CI, deployment, and hosted evidence separately.
+- [x] Re-read nearest AGENTS files and verify a clean worktree. Branch `feat/mcp-2026-07-28-migration` from `0e58e3c3`.
+- [x] Upgrade `mcp-kit` to v0.6.0 and SDK to v1.8.0. Done with the same release candidate as skills-mcp
+      (`v0.5.14-0.20260925102941-07980ed9c9da`), no local `replace`, plus Go `1.26.4` → `1.27.0`. The v0.6.0 tag is
+      still gated on Task 9, so both consumers are repinned together after the tag lands.
+- [x] Remove deleted `DisableLocalhostProtection`. Preserve the kit's explicit Origin policy; do not weaken
+      localhost/DNS-rebinding protection to pass tests. Confirmed the field was never deleted; it was kept and now
+      carries a comment explaining why, so the next reader does not repeat the plan's original mistake.
+- [x] Apply modern-only options, stateless handler, explicit capabilities/cache policy, CORS headers, and
+      session-free tests as in skills-mcp. Options and `Stateless: true` in `internal/mcpserver/server.go`; CORS
+      allow-list extended in `internal/api/http_helpers.go`, which wraps the `/mcp` route. vorrent had no
+      session-header exposure to remove and no session-threading test helpers, so its test surface needed only the
+      realm assertion below.
+- [x] Update live docs and PR-02-style probes; preserve archived plans as history. Kit-side
+      `docs/migration/vorrent.md` gained required change #11 plus a gotcha for the challenge realm.
+- [x] Run repository-defined focused/boundary suites and official conformance. `go build ./...`, `just lint-go`
+      (0 issues), full `go test ./internal/api/... ./internal/config/... ./internal/discovery/... ./internal/torrent/service/... -count=1`,
+      and `just test-backend-fast` all green. Conformance against vorrent was **not** run.
+- [x] Commit and push after local proof. Pushed `1941c55c` to
+      `feat/mcp-2026-07-28-migration`. CI not yet observed for this branch.
+- [ ] With owner approval, deploy and run authenticated discover/tools-list and OAuth recovery. **Blocked on owner
+      approval to deploy.**
+
+Vorrent's build and lint gate were both broken on `main` before this migration, so the branch also repairs them:
+
+- `go build ./...` failed on `main` because `cd2ebe6c` pinned `go-diskfs => v1.7.0` for rclone v1.73.5 and the tree had
+  since moved to rclone v1.75.0, whose squashfs backend needs go-diskfs v1.9.x. Dropping the stale replace fixes it.
+- Raising the `go` directive forces `go mod tidy` to resolve golangci-lint v2.11.4 → v2.14.0, because v2.11.4 cannot
+  decode Go 1.27 export data. The newer analyzers then flag 8 pre-existing findings; all 8 are resolved, including a
+  real path-traversal in `parseHLSRequestPath` and a pointer-formatting bug in the audit diagnostic.
+
+One kit behavior change surfaced here that the original plan did not anticipate: the bearer challenge realm moved from
+`"mcp-kit"` to `"OAuth"` in kit `v0.5.10`. vorrent pinned `v0.5.8`, so its test passed on `main` and failed on the
+upgrade. `just test-backend-fast` does **not** catch it — only the full `internal/api` suite does.
 
 ---
 
@@ -520,10 +568,12 @@ Fill this during delivery; never turn planned commands into claimed evidence.
 | Boundary | Commit/version | Local proof | CI | Hosted/deployed proof |
 |---|---|---|---|---|
 | mcp-kit release candidate | `8101108` (migration) + `9973cf3` (CI fix) on `feat/mcp-2026-07-28-migration`; PR [#5](https://github.com/haakco/mcp-kit/pull/5) | `just quality` (build, vet, deep lint 0 issues, structural lint 0 issues, race — 13 packages), `just vulncheck` (no vulnerabilities), `just conformance` (CLI `0.2.0-alpha.11`, `--requirements 2026-07-28`, 164 passed / 0 failed scored, 0 baseline entries), negative control `-stateless=false` exits 1, `actionlint` clean, suite-selection logic verified under `/bin/dash`, `git diff --check` clean | **Green** on run [36123660998](https://github.com/haakco/mcp-kit/actions/runs/36123660998): Detect changes pass, Quality pass (4m55s), Conformance pass (1m54s), GitGuardian pass. First run failed and correctly skipped the suites; root cause was `set -o pipefail` under dash, fixed in `9973cf3`. | n/a |
-| skills-mcp candidate | — | — | — | — |
-| mcp-kit v0.6.0 | — | — | — | module/tag fetch — |
-| skills-mcp v0.6.0 | — | — | — | — |
-| vorrent v0.6.0 | — | — | — | — |
+| skills-mcp candidate | `83ee190a` on `feat/mcp-2026-07-28-migration` (base `f8624a5d`) | `go build ./...`, `go vet ./...`, `gofmt` clean, `tooling/scripts/check-go-structure.sh apps/skills-mcp` clean, and **full** `SKILLS_TEST_POSTGRES_URL='postgres://skills:skills@127.0.0.1:15432/skills?sslmode=disable' go test -p 1 ./... -count=1` green (Postgres 18 provided locally; `internal/server` alone 62.8s). Helper rewrite proved by the suite itself: `postMCP` now sends real 2026-07-28 `_meta` + `Mcp-Method`/`Mcp-Name` headers, so a wrong header or missing `_meta` fails as `-32020` instead of passing silently. `TestAPI_DiscoverCapabilities` pins `supportedVersions == [2026-07-28]`, `cacheScope: private`, positive `ttlMs`. | Not yet observed for this branch. | Pending owner approval to deploy. |
+| vorrent candidate | `1941c55c` on `feat/mcp-2026-07-28-migration` (base `0e58e3c3`) | `go build ./...` clean (was **broken** on `main`), `just lint-go` `0 issues.` (was 8), `go test ./internal/api/... ./internal/config/... ./internal/discovery/... ./internal/torrent/service/... -count=1` green, `just test-backend-fast` green, new `TestParseHLSRequestPath` covers sibling-directory traversal. `main`'s breakage independently confirmed pre-existing by reproducing it in a worktree of `main` under both Go 1.26.8 and Go 1.27.1. | Not yet observed for this branch. | Pending owner approval to deploy. |
+| kit migration-doc follow-up | `95e4962` on `feat/mcp-2026-07-28-migration` | Doc-only: adds the `realm="mcp-kit"` → `"OAuth"` change to `docs/migration/vorrent.md` as required change #11 and a gotcha, after that change broke a vorrent test. | Pending. | n/a |
+| mcp-kit v0.6.0 | — | — | — | Not tagged. Gated on owner approval after the skills-mcp deployment proves the same commit (Task 9). |
+| skills-mcp v0.6.0 | — | — | — | Not repinned. Pending the tag and the deployment probe. |
+| vorrent v0.6.0 | — | — | — | Not repinned. Pending the tag and the deployment probe. |
 
 Dependabot: all 7 open alerts on `main` (2 high, 1 moderate, 4 low) are addressed on the branch — `grpc`
 v1.82.1 → v1.83.1 and `otel` v1.43.0 → v1.46.0. GitHub re-evaluates the default branch only after the change lands,
