@@ -37,6 +37,10 @@ drops two `mcpkit.Config` fields.
    Rewrite the `PR-02`-style live probe around `server/discover` then `tools/list`.
 10. **CIMD.** Metadata documents are resolved by default. Set `oauth.ClientIDMetadata.Disabled` and
     `oidc.DiscoveryConfig.ClientIDMetadataDocumentSupported = false` together if Vorrent must stay registration-only.
+11. **Bearer challenge realm changed.** The invalid-token challenge is `Bearer realm="OAuth"`. It was
+    `realm="mcp-kit"` up to `v0.5.9` and became `"OAuth"` in `v0.5.10`, so any test or probe that asserts the old
+    realm fails after this upgrade. Vorrent's `TestRegisterMCPIfEnabled_UsesKitBearerChallenge` hit exactly this.
+    The challenge still omits `scope` on `invalid_token` and adds it only on `insufficient_scope`.
 
 ### Rollout order
 
@@ -128,3 +132,5 @@ No Vorrent destructive/fixture-heavy migration blocker remains open. The final V
 - `v0.6.0`: a 2026-07-28 request against a stateful handler fails with `-32022`. Check `Stateless: true` first.
 - `v0.6.0`: `-32020` means a `Mcp-Method` / `Mcp-Name` / `Mcp-Protocol-Version` header disagrees with the body, not
   that auth failed.
+- `v0.6.0`: the kit's bearer challenge realm is `"OAuth"`. It was `"mcp-kit"` before `v0.5.10`. A consumer that
+  upgrades from `v0.5.8`/`v0.5.9` and asserts the realm in its own tests must update those assertions.
