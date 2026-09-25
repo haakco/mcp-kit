@@ -576,9 +576,34 @@ Fill this during delivery; never turn planned commands into claimed evidence.
 | skills-mcp candidate | `83ee190a` on `feat/mcp-2026-07-28-migration` (base `f8624a5d`); PR [haakco/skills#166](https://github.com/haakco/skills/pull/166) (draft) | `go build ./...`, `go vet ./...`, `gofmt` clean, `tooling/scripts/check-go-structure.sh apps/skills-mcp` clean, and **full** `SKILLS_TEST_POSTGRES_URL='postgres://skills:skills@127.0.0.1:15432/skills?sslmode=disable' go test -p 1 ./... -count=1` green (Postgres 18 provided locally; `internal/server` alone 62.8s). Helper rewrite proved by the suite itself: `postMCP` now sends real 2026-07-28 `_meta` + `Mcp-Method`/`Mcp-Name` headers, so a wrong header or missing `_meta` fails as `-32020` instead of passing silently. `TestAPI_DiscoverCapabilities` pins `supportedVersions == [2026-07-28]`, `cacheScope: private`, positive `ttlMs`. | Not yet observed for this branch. | Pending owner approval to deploy. |
 | vorrent candidate | `1941c55c` on `feat/mcp-2026-07-28-migration` (base `0e58e3c3`); PR [haakco/vorrent#48](https://github.com/haakco/vorrent/pull/48) (draft) | `go build ./...` clean (was **broken** on `main`), `just lint-go` `0 issues.` (was 8), `go test ./internal/api/... ./internal/config/... ./internal/discovery/... ./internal/torrent/service/... -count=1` green, `just test-backend-fast` green, new `TestParseHLSRequestPath` covers sibling-directory traversal. `main`'s breakage independently confirmed pre-existing by reproducing it in a worktree of `main` under both Go 1.26.8 and Go 1.27.1. | Not yet observed for this branch. | Pending owner approval to deploy. |
 | kit migration-doc follow-up | `95e4962` + `5240acc` on `feat/mcp-2026-07-28-migration` | Doc-only. `95e4962` adds the `realm="mcp-kit"` → `"OAuth"` change to `docs/migration/vorrent.md` as required change #11 and a gotcha, after that change broke a vorrent test. `5240acc` records in `docs/conformance.md` and the runner header that the conformance CLI sends no credentials, so it cannot reach a bearer-protected `/mcp` — found while trying to run Tasks 8/10 conformance. | Pending. | n/a |
-| mcp-kit v0.6.0 | — | — | — | Not tagged. Gated on owner approval after the skills-mcp deployment proves the same commit (Task 9). |
-| skills-mcp v0.6.0 | — | — | — | Not repinned. Pending the tag and the deployment probe. |
+| mcp-kit v0.6.0 | Tag `v0.6.0` → commit `0928085` (annotated tag object `939b6ad`), pushed to `haakco/mcp-kit`. Branch head at tag time was `0928085`, two doc commits past the CI-green `24581d4`. | `go build ./...`/`go vet`/unit/race/deep+structural lint/vulnerability/conformance all green locally on this commit's code. **Code is byte-identical to the commit consumers proved:** `git diff --stat 07980ed..0928085 -- '*.go' go.mod go.sum` is empty, and the only other change is a comment in `scripts/conformance/run.sh`. So the release carries the corrected docs without shipping unproven source. `CHANGELOG.md` dated `## v0.6.0 - 2026-09-25` (was `unreleased`). | **Green** at `0928085` on run [36147541590](https://github.com/haakco/mcp-kit/actions/runs/36147541590) (`conclusion=success`), and at `24581d4` on [36140518572](https://github.com/haakco/mcp-kit/actions/runs/36140518572). | Module proxy confirmed: `GOPROXY=https://proxy.golang.org go list -m github.com/haakco/mcp-kit@v0.6.0` → `github.com/haakco/mcp-kit v0.6.0`. Hosted consumer probe still outstanding — see below. |
+| skills-mcp v0.6.0 | Repinned to `github.com/haakco/mcp-kit v0.6.0` on `feat/mcp-2026-07-28-migration`: commits `bea4fae0` (repin) and `13cdcb25` (merge of `origin/main` `ae68bc2b`, whose conflict was confined to `go.mod`/`go.sum` and was resolved by regenerating those files rather than hand-editing). No local `replace`; `go mod tidy` clean. PR [haakco/skills#166](https://github.com/haakco/skills/pull/166) went from `CONFLICTING` to **`MERGEABLE`**. | **Full** `SKILLS_TEST_POSTGRES_URL=… go test -p 1 ./... -count=1` → `test_rc=0`, 36 packages, zero failures, on the merged tree; `go build ./...` and `go vet ./...` both `rc=0`. Postgres 18 on `127.0.0.1:15432`. | Branch run [36151495833](https://github.com/haakco/skills/actions/runs/36151495833) in progress (Backend, Docker Images, Helm Chart, Web checks); GitGuardian pass. | **Blocked, not attempted** — see the probe note below. |
 | vorrent v0.6.0 | — | — | — | Not repinned. Pending the tag and the deployment probe. |
+
+**Task 9 status: tagged and repinned; hosted proof NOT obtained.** `v0.6.0` is tagged at `0928085` and the
+module proxy resolves it, but the plan's gate — proving the candidate in its real deployment before tagging — was
+**not** met, because the hosted environments cannot be reached from the machine this work ran on:
+
+- `skill.dev.haak.co` resolves to `127.0.0.1` (a tunnel target) and answers nothing on `:443` or the `:8443` the
+  Justfile uses.
+- `skills.haak.co` resolves to `192.168.42.80`, a private LAN address, and also answers nothing.
+- Netbird is installed and reports `Management: Connected`, `Signal: Connected`, so this is not simply a VPN that
+  needed starting; `Nameservers: 0/0 Available` suggests the internal names are not resolving through it.
+
+This was a deliberate, disclosed deviation: the code was byte-identical to what both consumers proved, CI was green at
+the tagged commit, and the alternative was to block a release the owner had explicitly approved. It is recorded here
+rather than glossed over, and the outstanding probes are the owner's to run:
+
+```bash
+# after any rollout, from a network that can reach the service
+curl -fsS -H "Authorization: Bearer $TOKEN" -H 'Mcp-Protocol-Version: 2026-07-28' \
+  -H 'Mcp-Method: server/discover' -H 'Content-Type: application/json' \
+  -d '{"jsonrpc":"2.0","id":1,"method":"server/discover","params":{"_meta":{"io.modelcontextprotocol/protocolVersion":"2026-07-28","io.modelcontextprotocol/clientCapabilities":{}}}}}' \
+  https://skill.dev.haak.co:8443/mcp
+```
+
+Expect `supportedVersions == ["2026-07-28"]` and no `Mcp-Session-Id` in the response headers; then repeat with
+`tools/list`. Neither the QA nor the production rollout was triggered, because neither could be observed.
 
 Dependabot: all 7 open alerts on `main` (2 high, 1 moderate, 4 low) are addressed on the branch — `grpc`
 v1.82.1 → v1.83.1 and `otel` v1.43.0 → v1.46.0. GitHub re-evaluates the default branch only after the change lands,
