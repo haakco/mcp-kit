@@ -10,7 +10,10 @@
 #   * CI runs it with no target, so it starts the SDK's own reference server and
 #     proves the pinned CLI, the revision profile, and the baseline still agree.
 #   * A consumer runs it with CONFORMANCE_URL pointed at their server to prove
-#     their tools, resources, and prompts on the 2026-07-28 wire.
+#     their tools, resources, and prompts on the 2026-07-28 wire. Note the CLI
+#     sends no credentials, so a bearer-protected /mcp must be reached through a
+#     token-injecting bridge; see docs/conformance.md, "Authenticated servers
+#     need a bridge".
 #
 # Usage:
 #   scripts/conformance/run.sh [--url <url>] [--results <dir>] [--verbose]

@@ -26,6 +26,21 @@ With `CONFORMANCE_URL` unset the runner builds the MCP Go SDK's own reference se
 the suite against it. That run is a smoke test of the gate: it proves the pinned CLI and revision profile still agree
 with each other, so a silent upstream change cannot hollow out the check.
 
+### Authenticated servers need a bridge
+
+The CLI sends no credentials: `server --help` offers no token or header flag, and it does not perform an OAuth flow
+for you. Pointing `CONFORMANCE_URL` at a consumer whose `/mcp` is protected by the kit's bearer middleware therefore
+tests the 401 path, not the tools. There are three workable routes, in order of preference:
+
+1. Run the suite inside the consumer's own test harness, where it can mint a token and inject it — this is what the
+   consumer boundary suites do.
+2. Put a token-injecting proxy in front of the deployed service and point `CONFORMANCE_URL` at the proxy.
+3. Run against a local instance started without bearer auth. Only do this if the consumer actually has such a mode;
+   do not add one purely to satisfy the suite, because a probe that disables the protection under test proves nothing
+   about the protected path.
+
+Whatever the route, record which one was used. "Conformance passed" without naming the auth path is not evidence.
+
 ## The pinned CLI
 
 `CONFORMANCE_VERSION` defaults to `0.2.0-alpha.11`.
