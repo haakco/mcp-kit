@@ -32,8 +32,10 @@ resources, prompts, user tables, RBAC, or audit storage move into the kit.
 
 **Parallel Work Model:** Task 1 is a prerequisite for every other task and must land first. Tasks 2, 4, and 6 are
 independent of each other and may run concurrently on non-overlapping files. Task 3 depends on Task 2. Task 5 depends
-on Tasks 2 and 3. Task 7 depends on Tasks 2–6. Task 8 depends on all behavior decisions being final. Per repo policy
-there is no `git stash` and no `git reset` at any point.
+on Tasks 2 and 3. Task 7 depends on Tasks 2–6. Task 9 depends on Tasks 2–7 and must run **before** the v0.6.0 tag, per
+this repo's own rule that transport-affecting changes are re-verified on at least one downstream consumer before
+tagging. Task 8 drafts the release material once the behaviour decisions are final and finalizes it after Task 9
+passes. Per repo policy there is no `git stash` and no `git reset` at any point.
 
 ---
 
@@ -437,19 +439,67 @@ bash -n scripts/conformance/run.sh
 
 ---
 
+## Task 9: Verify on a downstream consumer, then roll out
+
+**Files:**
+
+- Modify: `docs/cycle-methodology.md` (record the modern-only verification steps)
+- Modify: `CHANGELOG.md` (finalize only after this task passes)
+- No behaviour changes in this repo; the consumer-side edits happen in `skills-mcp` and `vorrent`
+
+This task is not optional polish. `AGENTS.md` already requires that kit changes affecting transport, auth, or
+discovery be re-verified with the bootstrap probe (`PR-02`) on at least one downstream consumer before a release is
+tagged, and this migration touches all three. The plan has no downstream evidence without it.
+
+- [ ] Upgrade **one** consumer first, not both. The master plan's migration order is deliberately serial so the kit
+      API is validated against one real consumer before the next adopts it. Keep that property.
+- [ ] Per consumer, in that consumer's own repo and its own plan:
+  1. Confirm the consumer's clients speak `2026-07-28`. Probe with `server/discover`. A legacy-only client cannot
+     connect at all, and this is the check that prevents an outage dressed up as a library upgrade.
+  2. Bump `mcp-kit` to the released version and `go-sdk` to v1.8.0.
+  3. Narrow to `SupportedProtocolVersions: ["2026-07-28"]`, or inherit the kit's modern-only default.
+  4. Replace the `RunHandshake` call site with the new discovery helper.
+  5. Turn on stateless HTTP: Task 2's config knob plus `StreamableHTTPOptions{Stateless: true}` on the consumer's
+     handler.
+  6. Run the frozen conformance suite against the **consumer's** deployment, not the kit's reference server.
+  7. Update the consumer's own migration and release notes. A line in this repo's `CHANGELOG.md` is not notification.
+- [ ] Run the bootstrap probe (`PR-02`) and record the result in `docs/lessons.md` as this migration's downstream
+      evidence. If it fails, the fix belongs here, before the tag, not in the consumer.
+- [ ] Only then finalize `CHANGELOG.md` and tag v0.6.0.
+- [ ] Upgrade the second consumer after the first is verified in its own deployment, not simultaneously.
+
+**Verify:**
+
+```bash
+just quality
+just conformance
+# then, against the first upgraded consumer deployment:
+#   PR-02 bootstrap probe, plus
+#   npx @modelcontextprotocol/conformance server --url <consumer-url> --requirements 2026-07-28
+```
+
+**If a consumer cannot confirm modern clients:** stop, and do not tag. A modern-only library that cannot be adopted is
+worse than an unupgraded one. The honest options are to wait, or to revisit D1 as a deliberate decision with that
+evidence — never to ship and find out in a consumer's production.
+
+---
+
 ## Final Verification
 
 ```bash
 # Full local gate.
 just quality
 
-# Revision support, both eras, at their own wire.
+# Revision support at 2026-07-28 — the only revision the kit serves.
 just conformance
 
 # Prove the modern path is genuinely modern.
 go test -run TestNoHandshakeNoSession -v ./testkit/...
 go test -run TestDiscoverReportsIdentity -v ./testkit/...
 go test -run TestLegacyInitializeRejected -v ./testkit/...
+
+# Downstream verification, required before the tag (repo rule for transport changes).
+#   PR-02 bootstrap probe + the conformance suite against one consumer deployment.
 ```
 
 ## Completion Criteria
@@ -470,6 +520,9 @@ go test -run TestLegacyInitializeRejected -v ./testkit/...
    specific check and a reason, and a demonstrated failure proving the gate can fail.
 8. `CHANGELOG.md` v0.6.0 carries migration notes; `DESIGN.md` records D1–D4; `AGENTS.md` no longer contradicts the
    repo; the three `docs/migration/*.md` contracts are updated.
+9. At least one consumer is verified end to end on `2026-07-28` — modern clients confirmed, conformance green against
+   its own deployment, bootstrap probe (`PR-02`) recorded — **before** v0.6.0 is tagged. Without this the migration's
+   downstream evidence does not exist, and the repo's own rule for transport changes is unmet.
 
 ## What This Plan Deliberately Does Not Do
 
