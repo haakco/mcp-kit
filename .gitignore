@@ -23,3 +23,5 @@ vendor/
 
 # Agent-local state (pi session, cron, loops)
 .pi/
+
+.codegraph
