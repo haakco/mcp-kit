@@ -364,6 +364,34 @@ func TestAuthorizationCodePKCEFlow(t *testing.T) {
 	}
 }
 
+func TestAuthorizeResponseIncludesIssuer(t *testing.T) {
+	store := storage.NewMemoryStore()
+	provider := newTestProvider(t, store)
+	savePKCEClient(t, store)
+	server := newOAuthTestServer(provider)
+	defer server.Close()
+
+	verifier := "test-code-verifier-1234567890-must-be-at-least-43-characters-long"
+	response, err := noRedirectClient().Get(authorizeURL(server.URL, verifier, "state-123456"))
+	if err != nil {
+		t.Fatalf("GET authorize: %v", err)
+	}
+	defer func() { _ = response.Body.Close() }()
+	if response.StatusCode != http.StatusSeeOther {
+		t.Fatalf("authorize status = %d, want 303", response.StatusCode)
+	}
+
+	callbackURL, err := url.Parse(response.Header.Get("Location"))
+	if err != nil {
+		t.Fatalf("parse callback URL: %v", err)
+	}
+	// RFC 9207: the client must be able to confirm the response came from the
+	// issuer it started the flow with before redeeming the code.
+	if got := callbackURL.Query().Get("iss"); got != "https://mcp.example.test" {
+		t.Fatalf("iss = %q, want the configured issuer; callback=%s", got, callbackURL)
+	}
+}
+
 func TestAuthorizeRejectsBadState(t *testing.T) {
 	store := storage.NewMemoryStore()
 	provider := newTestProvider(t, store)
@@ -795,6 +823,7 @@ func newTestProviderWithConfig(t *testing.T, store storage.Store, cfg oauth.Conf
 		AuditEmitter:        cfg.AuditEmitter,
 		RefreshReplayWindow: cfg.RefreshReplayWindow,
 		Now:                 cfg.Now,
+		ClientIDMetadata:    cfg.ClientIDMetadata,
 	})
 	if err != nil {
 		t.Fatalf("New() error = %v", err)

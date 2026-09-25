@@ -10,7 +10,7 @@ Status is **pre-1.0**. Breaking changes between minor versions are allowed and m
 
 ## Common commands
 
-This is a single Go module with no Makefile, justfile, or CI config — use the `go` toolchain directly. Go 1.26 (toolchain `go1.26.2`) is required.
+This is a single Go module. A `justfile` owns the local commands and `.github/workflows/ci.yml` runs the quality gate on the self-hosted `haakco-build` runner; there is no Makefile. Go 1.27 (toolchain `go1.27.1`, pinned in `mise.toml` and CI) is required.
 
 ```bash
 # Build (compile-check) every package in the module.

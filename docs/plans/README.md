@@ -6,7 +6,7 @@ Active and archived implementation plans for `mcp-kit`.
 
 | Plan | Status | Goal |
 |---|---|---|
-| [2026-09-25_mcp-2026-07-28-protocol-migration.md](2026-09-25_mcp-2026-07-28-protocol-migration.md) | Ready for execution | Move the kit and both verified consumers onto MCP 2026-07-28, prove official conformance, and release v0.6.0 |
+| [2026-09-25_mcp-2026-07-28-protocol-migration.md](2026-09-25_mcp-2026-07-28-protocol-migration.md) | In progress — kit tasks 1-7 locally proven on `feat/mcp-2026-07-28-migration`; consumer rollout (tasks 8-11) pending | Move the kit and both verified consumers onto MCP 2026-07-28, prove official conformance, and release v0.6.0 |
 
 ## Archive
 

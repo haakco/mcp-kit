@@ -2,12 +2,13 @@ package main
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"log"
 	"net/http"
 	"os"
 	"strings"
+
+	"github.com/modelcontextprotocol/go-sdk/mcp"
 
 	"github.com/haakco/mcp-kit/mcpkit"
 	"github.com/haakco/mcp-kit/oauth"
@@ -39,8 +40,35 @@ func newHandler() (http.Handler, error) {
 		return nil, err
 	}
 
-	mcpServer, err := mcpkit.New(mcpkit.Config{
-		Handler:        http.HandlerFunc(handleMCP),
+	// The kit supplies middleware only. The consumer owns the SDK server: its
+	// identity, its transport options, and its cache policy.
+	sdkServer := mcp.NewServer(
+		&mcp.Implementation{Name: "minimal-server", Version: "0.0.0-example"},
+		&mcp.ServerOptions{
+			// Explicit empty capabilities: without this the SDK advertises the
+			// historical default logging capability. Tool capabilities are still
+			// inferred from the handlers registered below.
+			Capabilities:              &mcp.ServerCapabilities{},
+			SupportedProtocolVersions: []string{mcpkit.ProtocolVersion},
+			// Results vary by caller because every request carries a bearer token.
+			SetCacheable: mcpkit.PrivateCache(mcpkit.DefaultCacheTTL),
+		},
+	)
+	mcp.AddTool(sdkServer, &mcp.Tool{
+		Name:        "hello_world",
+		Description: "Return a greeting.",
+	}, func(context.Context, *mcp.CallToolRequest, any) (*mcp.CallToolResult, any, error) {
+		return &mcp.CallToolResult{
+			Content: []mcp.Content{&mcp.TextContent{Text: "hello world"}},
+		}, nil, nil
+	})
+
+	kitServer, err := mcpkit.New(mcpkit.Config{
+		Handler: mcp.NewStreamableHTTPHandler(
+			func(*http.Request) *mcp.Server { return sdkServer },
+			// Stateless is mandatory for 2026-07-28 over Streamable HTTP.
+			&mcp.StreamableHTTPOptions{Stateless: true},
+		),
 		AllowedOrigins: []string{"http://localhost:8080"},
 		AllowLoopback:  true,
 		Bearer: mcpkit.BearerConfig{
@@ -70,7 +98,7 @@ func newHandler() (http.Handler, error) {
 			GrantedScopes: []string{"openid", "mcp.read"},
 		}, nil
 	})
-	mux.Handle("/mcp", mcpServer.Handler())
+	mux.Handle("/mcp", kitServer.Handler())
 	return mux, nil
 }
 
@@ -104,59 +132,6 @@ func listenAddr() string {
 		return value
 	}
 	return ":8080"
-}
-
-func handleMCP(w http.ResponseWriter, r *http.Request) {
-	var request struct {
-		ID     any    `json:"id"`
-		Method string `json:"method"`
-	}
-	if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
-		http.Error(w, "malformed payload: invalid JSON", http.StatusBadRequest)
-		return
-	}
-	if request.Method == "initialize" {
-		w.Header().Set("Mcp-Session-Id", "minimal-example-session")
-		writeJSON(w, map[string]any{
-			"jsonrpc": "2.0",
-			"id":      request.ID,
-			"result": map[string]any{
-				"protocolVersion": "2025-03-26",
-				"capabilities":    map[string]any{"tools": map[string]any{}},
-				"serverInfo":      map[string]any{"name": "minimal-server", "version": "0.0.0-example"},
-			},
-		})
-		return
-	}
-	if request.Method == "notifications/initialized" {
-		w.WriteHeader(http.StatusAccepted)
-		return
-	}
-	if request.Method != "tools/list" {
-		http.Error(w, "JSON RPC not handled: "+request.Method, http.StatusBadRequest)
-		return
-	}
-
-	writeJSON(w, map[string]any{
-		"jsonrpc": "2.0",
-		"id":      request.ID,
-		"result": map[string]any{
-			"tools": []map[string]any{
-				{
-					"name":        "hello_world",
-					"description": "Return a greeting.",
-					"inputSchema": map[string]any{"type": "object"},
-				},
-			},
-		},
-	})
-}
-
-func writeJSON(w http.ResponseWriter, value any) {
-	w.Header().Set("Content-Type", "application/json")
-	if err := json.NewEncoder(w).Encode(value); err != nil {
-		log.Printf("write JSON: %v", err)
-	}
 }
 
 type staticTokenValidator struct{}

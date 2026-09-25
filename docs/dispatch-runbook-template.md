@@ -1,6 +1,6 @@
 # MCP Dispatch Runbook Template
 
-**Last verified:** 2026-05-01
+**Last verified:** 2026-09-26
 
 Use this template to create a consumer-specific live MCP runbook. Replace placeholders with the server's actual URLs, auth credentials, expected surface counts, and evidence paths.
 
@@ -30,14 +30,18 @@ curl -fsS "$MCP_BASE_URL/<health-path>" | jq .
 curl -fsS "$MCP_BASE_URL/.well-known/oauth-protected-resource" | jq .
 curl -fsS "$MCP_BASE_URL/.well-known/oauth-authorization-server" | jq .
 
-# Anonymous MCP request should be rejected when auth is enabled.
+# Anonymous MCP request should be rejected when auth is enabled. On MCP
+# 2026-07-28 the first request a client makes is server/discover.
 curl -i -X POST "$MCP_BASE_URL/mcp" \
   -H 'Content-Type: application/json' \
   -H 'Accept: application/json, text/event-stream' \
-  -d '{"jsonrpc":"2.0","id":1,"method":"initialize"}'
+  -d '{"jsonrpc":"2.0","id":1,"method":"server/discover","params":{"_meta":{"io.modelcontextprotocol/protocolVersion":"2026-07-28","io.modelcontextprotocol/clientCapabilities":{}}}}'
 ```
 
-## Phase 0 - Bootstrap OAuth + MCP Session
+## Phase 0 - Bootstrap OAuth + MCP Discovery
+
+There is no session to establish on MCP 2026-07-28. Every MCP request below is a self-contained POST carrying the
+protocol version in `_meta` and mirrored into `Mcp-Protocol-Version` and `Mcp-Method`.
 
 ### Register Client
 
@@ -81,7 +85,10 @@ REFRESH=$(echo "$TOKEN_RESP" | jq -r .refresh_token)
 
 Do not commit token evidence unless secrets are redacted.
 
-### Initialize MCP Session
+### Discover
+
+There is no `initialize` and no `notifications/initialized`. `server/discover` is the first request, and it must not
+return a session header.
 
 ```bash
 curl -fsSi -X POST "$MCP_BASE_URL/mcp" \
@@ -89,19 +96,21 @@ curl -fsSi -X POST "$MCP_BASE_URL/mcp" \
   -H 'Content-Type: application/json' \
   -H 'Accept: application/json, text/event-stream' \
   -H "Authorization: Bearer $TOKEN" \
-  -d '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-03-26","capabilities":{},"clientInfo":{"name":"e2e-bootstrap","version":"0"}}}' \
-  > "$EVIDENCE_DIR/initialize.txt"
+  -H 'Mcp-Protocol-Version: 2026-07-28' \
+  -H 'Mcp-Method: server/discover' \
+  -d '{"jsonrpc":"2.0","id":1,"method":"server/discover","params":{"_meta":{"io.modelcontextprotocol/protocolVersion":"2026-07-28","io.modelcontextprotocol/clientCapabilities":{}}}}' \
+  > "$EVIDENCE_DIR/discover.txt"
 
-SESSION=$(grep -i '^mcp-session-id:' "$EVIDENCE_DIR/initialize.txt" | awk '{print $2}' | tr -d '\r')
+# No sessions: this must print nothing.
+grep -i '^mcp-session-id:' "$EVIDENCE_DIR/discover.txt" && echo "FAIL: session header present"
 
-curl -fsS -X POST "$MCP_BASE_URL/mcp" \
-  -H "Origin: $MCP_ORIGIN" \
-  -H 'Content-Type: application/json' \
-  -H 'Accept: application/json, text/event-stream' \
-  -H "Authorization: Bearer $TOKEN" \
-  -H "Mcp-Session-Id: $SESSION" \
-  -d '{"jsonrpc":"2.0","method":"notifications/initialized"}'
+# The server must advertise exactly one revision.
+grep '^data: ' "$EVIDENCE_DIR/discover.txt" | head -1 | sed 's/^data: //' \
+  | jq -e '.result.supportedVersions == ["2026-07-28"] | .result.cacheScope, .result.resultType'
 ```
+
+Expected: `supportedVersions` is exactly `["2026-07-28"]`, `cacheScope` is `private`, `resultType` is `complete`, and
+no `Mcp-Session-Id` header is present.
 
 ### Smoke Surface Inventory
 
@@ -111,15 +120,17 @@ curl -fsS -X POST "$MCP_BASE_URL/mcp" \
   -H 'Content-Type: application/json' \
   -H 'Accept: application/json, text/event-stream' \
   -H "Authorization: Bearer $TOKEN" \
-  -H "Mcp-Session-Id: $SESSION" \
-  -d '{"jsonrpc":"2.0","id":2,"method":"tools/list"}' \
+  -H 'Mcp-Protocol-Version: 2026-07-28' \
+  -H 'Mcp-Method: tools/list' \
+  -d '{"jsonrpc":"2.0","id":2,"method":"tools/list","params":{"_meta":{"io.modelcontextprotocol/protocolVersion":"2026-07-28","io.modelcontextprotocol/clientCapabilities":{}}}}' \
   > "$EVIDENCE_DIR/tools_list.raw"
 
 grep '^data: ' "$EVIDENCE_DIR/tools_list.raw" | head -1 | sed 's/^data: //' \
   | tee "$EVIDENCE_DIR/tools_list.json" | jq '.result.tools | length'
 ```
 
-Expected: `<expected tool count>`.
+Expected: `<expected tool count>`. Named methods (`tools/call`, `resources/read`, `prompts/get`) also need
+`Mcp-Name`; omitting it returns `-32020`.
 
 ## Phase 1 - Tool Coverage
 

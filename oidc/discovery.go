@@ -22,6 +22,12 @@ type DiscoveryConfig struct {
 	RevocationEndpoint    string
 	RegistrationEndpoint  string
 	ScopesSupported       []string
+
+	// ClientIDMetadataDocumentSupported advertises SEP-991 Client ID Metadata
+	// Document support. NewDiscoveryConfig sets it true because oauth.Provider
+	// resolves metadata documents by default; set it false when the provider is
+	// built with oauth.ClientIDMetadataConfig{Disabled: true}.
+	ClientIDMetadataDocumentSupported bool
 }
 
 // ProtectedResourceMetadata is RFC 9728 protected resource metadata.
@@ -44,13 +50,14 @@ type RouteConfig struct {
 func NewDiscoveryConfig(issuerURL string, scopes []string) DiscoveryConfig {
 	issuer := strings.TrimRight(issuerURL, "/")
 	return DiscoveryConfig{
-		Issuer:                issuer,
-		AuthorizationEndpoint: issuer + "/oauth/authorize",
-		TokenEndpoint:         issuer + "/oauth/token",
-		JWKSEndpoint:          issuer + "/.well-known/jwks.json",
-		RevocationEndpoint:    issuer + "/oauth/revoke",
-		RegistrationEndpoint:  issuer + "/oauth/register",
-		ScopesSupported:       append([]string{}, scopes...),
+		Issuer:                            issuer,
+		AuthorizationEndpoint:             issuer + "/oauth/authorize",
+		TokenEndpoint:                     issuer + "/oauth/token",
+		JWKSEndpoint:                      issuer + "/.well-known/jwks.json",
+		RevocationEndpoint:                issuer + "/oauth/revoke",
+		RegistrationEndpoint:              issuer + "/oauth/register",
+		ScopesSupported:                   append([]string{}, scopes...),
+		ClientIDMetadataDocumentSupported: true,
 	}
 }
 
@@ -78,6 +85,9 @@ func (d DiscoveryConfig) OpenIDConfiguration() map[string]any {
 	}
 	if d.ResourceMetadataURL != "" {
 		doc["resource_metadata"] = d.ResourceMetadataURL
+	}
+	if d.ClientIDMetadataDocumentSupported {
+		doc["client_id_metadata_document_supported"] = true
 	}
 	return doc
 }

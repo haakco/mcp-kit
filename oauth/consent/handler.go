@@ -175,6 +175,7 @@ func (h *Handler) completeApprove(w http.ResponseWriter, r *http.Request, reques
 		h.cfg.Provider.OAuth2Provider().WriteAuthorizeError(r.Context(), w, requester, err)
 		return
 	}
+	h.cfg.Provider.AddIssuerParameter(response)
 	h.emitConsentEvent(r.Context(), r, ActionConsentApproved, requester, subject, "approved", ResourcesFromValues(cleanParams))
 
 	redirectURL := RedirectURLFromResponder(requester, response)

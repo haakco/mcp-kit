@@ -171,6 +171,7 @@ func (l *Login) RunLoopback(ctx context.Context, opts LoopbackOptions) error {
 			Code:        r.code,
 			Verifier:    authRequest.Verifier,
 			Scope:       scope,
+			Issuer:      r.iss,
 		})
 	}
 }
@@ -197,7 +198,7 @@ func (l *Login) RunPasteRedirect(ctx context.Context, opts PasteOptions) error {
 	}
 	_ = l.openURL(authRequest.URL) //nolint:errcheck // courtesy browser open; paste flow remains usable on failure
 
-	code, err := readPastedRedirect(opts.In, authRequest.State)
+	code, iss, err := readPastedRedirect(opts.In, authRequest.State)
 	if err != nil {
 		return err
 	}
@@ -207,6 +208,7 @@ func (l *Login) RunPasteRedirect(ctx context.Context, opts PasteOptions) error {
 		Code:        code,
 		Verifier:    authRequest.Verifier,
 		Scope:       scope,
+		Issuer:      iss,
 	})
 }
 
@@ -375,9 +377,33 @@ type exchangeParams struct {
 	Code        string
 	Verifier    string
 	Scope       string
+	// Issuer is the RFC 9207 `iss` value from the authorization response. It is
+	// empty when the authorization server does not send one.
+	Issuer string
+}
+
+// validateAuthorizeIssuer enforces RFC 9207 issuer identification before the
+// authorization code is redeemed.
+//
+// An authorization server that omits `iss` is accepted for compatibility with
+// issuers that predate RFC 9207; the code is still bound to the token endpoint
+// the client discovered from the issuer. When `iss` is present it must name the
+// issuer the flow started with, otherwise the code may have been issued by a
+// different authorization server than the one the client trusts.
+func (l *Login) validateAuthorizeIssuer(iss string) error {
+	if iss == "" {
+		return nil
+	}
+	if strings.TrimRight(strings.TrimSpace(iss), "/") != l.Issuer {
+		return fmt.Errorf("authorization response issuer mismatch: got %q want %q", iss, l.Issuer)
+	}
+	return nil
 }
 
 func (l *Login) exchangeAndSave(ctx context.Context, p exchangeParams) error {
+	if err := l.validateAuthorizeIssuer(p.Issuer); err != nil {
+		return err
+	}
 	host, err := HostFromIssuer(l.Issuer)
 	if err != nil {
 		return err

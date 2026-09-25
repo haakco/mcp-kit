@@ -43,6 +43,12 @@ type Config struct {
 	// refresh-token response for a short window after rotation.
 	RefreshReplayWindow time.Duration
 	Now                 func() time.Time
+
+	// ClientIDMetadata configures server-side resolution of Client ID Metadata
+	// Documents. The zero value enables it with bounded defaults, which is what
+	// MCP revision 2026-07-28 prefers; dynamic client registration remains
+	// available as the fallback.
+	ClientIDMetadata ClientIDMetadataConfig
 }
 
 func (c *Config) applyDefaults() error {

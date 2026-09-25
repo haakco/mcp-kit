@@ -3,14 +3,18 @@
 A reusable Go library for building production-grade Model Context Protocol (MCP) servers with OAuth 2.1 authentication, key rotation, audit-ready middleware, and a battle-tested test methodology.
 
 > **Status:** Pre-1.0 (v0.x). API may change. Pin a specific minor version.
+>
+> **Protocol:** MCP revision **2026-07-28**, modern-only. The kit serves one revision, statelessly, with per-request
+> metadata instead of the retired `initialize` handshake. Requires Go 1.27 and MCP Go SDK v1.8.0.
 
 ## What it does
 
 `mcp-kit` extracts the cross-cutting concerns common to every MCP server:
 
-- **OAuth 2.1 server** with PKCE, dynamic client registration, refresh-token rotation, and 90-day signing-key rotation with grace window
+- **OAuth 2.1 server** with PKCE, dynamic client registration, Client ID Metadata Documents (SEP-991), refresh-token rotation, and 90-day signing-key rotation with grace window
 - **Bearer middleware** that accepts both OAuth-issued JWTs and Personal Access Tokens
-- **JSON-RPC envelope rewriter** so SDK protocol errors come out as canonical JSON-RPC envelopes (not plain-text 400s)
+- **JSON-RPC envelope rewriter** so the plain-text protocol errors an SDK handler can still emit come out as canonical JSON-RPC envelopes
+- **Private-by-default cache policy** (`mcpkit.PrivateCache`) so authenticated results are never marked `public`
 - **Origin allowlist** with explicit loopback allowance for browser MCP clients
 - **OIDC / OAuth discovery endpoints** (`/.well-known/openid-configuration`, `/.well-known/oauth-authorization-server`, `/.well-known/oauth-protected-resource`, path-specific protected-resource metadata, `/.well-known/jwks.json`)
 - **CLI auth helper** (`mcpkit/cliauth`) with browser-based PKCE flow and issuer-scoped 0600 file-backed token cache
@@ -51,14 +55,32 @@ func main() {
     resourceMetadataURL, err := oauth.ProtectedResourceMetadataURLFor(resourceURL)
     if err != nil { /* handle */ }
 
-    // 2. Wrap your official Go SDK MCP HTTP handler.
-    // The handler still owns domain authorization and audit: validate scopes,
-    // check RBAC, and emit audit events inside each tool/resource.
+    // 2. Build the SDK server and its handler first: the consumer owns identity,
+    //    capabilities, and the transport.
+    sdkServer := mcp.NewServer(
+        &mcp.Implementation{Name: "my-server", Version: "1.0.0"},
+        &mcp.ServerOptions{
+            Instructions: "...",
+            // Explicit empty capabilities: stops the SDK advertising the
+            // deprecated default logging capability.
+            Capabilities:              &mcp.ServerCapabilities{},
+            SupportedProtocolVersions: []string{mcpkit.ProtocolVersion},
+            // Authenticated results must not be cached as public.
+            SetCacheable: mcpkit.PrivateCache(mcpkit.DefaultCacheTTL),
+        },
+    )
+    // mcp.AddTool(sdkServer, ...)
+
+    // 3. Wrap it with the kit. Middleware order is fixed:
+    //    Origin -> Bearer -> Envelope -> SDK handler.
+    //    The handler still owns domain authorization and audit: validate scopes,
+    //    check RBAC, and emit audit events inside each tool/resource.
     mcpServer, err := mcpkit.New(mcpkit.Config{
-        Handler: myapp.NewAuditedMCPHandler(myapp.MCPDeps{
-            Authz: myapp.NewAuthz(db),
-            Audit: myapp.NewAuditEmitter(db),
-        }),
+        Handler: mcp.NewStreamableHTTPHandler(
+            func(*http.Request) *mcp.Server { return sdkServer },
+            // Mandatory for 2026-07-28 over Streamable HTTP.
+            &mcp.StreamableHTTPOptions{Stateless: true},
+        ),
         Bearer: mcpkit.BearerConfig{
             TokenValidator:      myapp.NewPATValidator(db),
             Introspector:        oauthProv.OAuth2Provider(),
@@ -72,7 +94,7 @@ func main() {
     })
     if err != nil { /* handle */ }
 
-    // 3. Mount on your HTTP framework.
+    // 4. Mount on your HTTP framework.
     mux := http.NewServeMux()
     mux.Handle("/mcp", mcpServer.Handler())
     authorize, err := consent.NewHandler(consent.Config{
@@ -103,6 +125,10 @@ metadata, and JSON-RPC envelope behavior. Consumers must still enforce
 tool/resource permissions and audit every sensitive domain operation in their
 handlers.
 
+For the full walkthrough, including the exact server options the protocol
+requires, see [docs/migration/new-server.md](docs/migration/new-server.md) and
+[docs/recipes/stateless-http.md](docs/recipes/stateless-http.md).
+
 ## OAuth Token Lifetimes
 
 By default, `oauth.Config` issues 1-hour access tokens and 30-day rotating refresh tokens. The short access-token lifetime limits the stale-token window when a client keeps sending a token that the server has already invalidated through revocation, database reset, or session cleanup.
@@ -112,12 +138,16 @@ For MCP clients using OAuth-backed Streamable HTTP, the standards-based recovery
 ## Documentation
 
 - [DESIGN.md](DESIGN.md) — full design rationale, package layout, public API
+- [docs/migration/new-server.md](docs/migration/new-server.md) — build a new 2026-07-28 server on the kit
+- [docs/recipes/stateless-http.md](docs/recipes/stateless-http.md) — stateless Streamable HTTP, and what it rules out
+- [docs/conformance.md](docs/conformance.md) — the official conformance gate
 - [docs/migration/skills-mcp.md](docs/migration/skills-mcp.md) — migration notes from the donor Skills MCP server
 - [docs/migration/vorrent.md](docs/migration/vorrent.md) — migration notes from Vorrent's kit-backed closeout
 - [docs/migration/from-mark3labs.md](docs/migration/from-mark3labs.md) — moving a Go MCP server from mark3labs to the official Go SDK
 - [docs/cycle-methodology.md](docs/cycle-methodology.md) — the E2E testing protocol
 - [docs/lessons.md](docs/lessons.md) — reusable MCP OAuth, JSON-RPC, and transport lessons
 - [docs/dispatch-runbook-template.md](docs/dispatch-runbook-template.md) — live-client runbook template for consumers
+- [CONTRIBUTING.md](CONTRIBUTING.md) and [SECURITY.md](SECURITY.md)
 
 ## Status
 
@@ -128,7 +158,9 @@ For MCP clients using OAuth-backed Streamable HTTP, the standards-based recovery
 | v0.2.0 — OAuth core extracted from skills-mcp | ✅ Complete |
 | v0.3.0 — skills-mcp migrated to kit | ✅ Complete |
 | v0.4.0 — Vorrent migrated to kit | ✅ Complete |
-| v1.0.0 — Meridian on kit + cycle methodology shipped | Planned |
+| v0.5.x — consent helpers, OAuth/PAT scope targeting, cache + discovery hardening | ✅ Complete |
+| v0.6.0 — MCP 2026-07-28 migration (modern-only, stateless, CIMD, conformance gate) | 🔄 Kit complete; consumer rollout in progress |
+| v1.0.0 — stable | Planned; deferred until the consumers have operated on the new wire |
 
 ## License
 

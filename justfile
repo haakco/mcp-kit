@@ -6,6 +6,10 @@ set dotenv-load := true
 default:
     @just --list
 
+# Version of govulncheck used locally and in CI. Pinned so the gate is
+# reproducible; `@latest` would make the same commit pass or fail on different days.
+govulncheck_version := "v1.8.0"
+
 # Build every package.
 build:
     go build ./...
@@ -46,6 +50,10 @@ check-dup:
 check-complexity:
     go tool golangci-lint run --allow-serial-runners --timeout=10m --enable-only=gocognit,gocyclo,funlen,nestif ./...
 
+# Run the vulnerability check. Identical command in CI.
+vulncheck:
+    go run golang.org/x/vuln/cmd/govulncheck@{{govulncheck_version}} ./...
+
 # Run the full local quality gate.
 quality:
     just build
@@ -53,6 +61,15 @@ quality:
     just lint-go-deep
     just lint-go-structural
     just test-race
+
+# Run the official MCP 2026-07-28 conformance suite.
+# Point CONFORMANCE_URL at a consumer server to check its tools/resources/prompts.
+conformance:
+    ./scripts/conformance/run.sh
+
+# Run the conformance suite against a specific server URL.
+conformance-against url:
+    ./scripts/conformance/run.sh --url {{url}}
 
 # Format Go code.
 format:

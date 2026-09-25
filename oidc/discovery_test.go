@@ -150,3 +150,22 @@ func assertJSONField(t *testing.T, mux *http.ServeMux, path string, key string, 
 		t.Fatalf("%s %s = %#v, want %q", path, key, payload[key], want)
 	}
 }
+
+// TestDiscoveryAdvertisesClientIDMetadataDocuments guards the SEP-991 contract:
+// a server that resolves metadata documents must say so, since the client picks
+// its registration mechanism from this metadata.
+func TestDiscoveryAdvertisesClientIDMetadataDocuments(t *testing.T) {
+	config := oidc.NewDiscoveryConfig("https://mcp.example.test", []string{"mcp.read"})
+
+	if !config.ClientIDMetadataDocumentSupported {
+		t.Fatal("NewDiscoveryConfig must enable client ID metadata documents by default")
+	}
+	if got := config.OpenIDConfiguration()["client_id_metadata_document_supported"]; got != true {
+		t.Fatalf("client_id_metadata_document_supported = %#v, want true", got)
+	}
+
+	config.ClientIDMetadataDocumentSupported = false
+	if _, present := config.OpenIDConfiguration()["client_id_metadata_document_supported"]; present {
+		t.Fatal("disabling metadata documents must drop the advertisement rather than send false")
+	}
+}

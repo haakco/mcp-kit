@@ -1,0 +1,18 @@
+# Expected conformance failures for the MCP 2026-07-28 requirement set.
+#
+# This file is passed to the conformance CLI as `--expected-failures`. It is
+# intentionally empty: the pinned CLI, the 2026-07-28 revision profile, and the
+# reference server the runner starts must agree with no exceptions.
+#
+# The CLI excludes extension scenarios (the `tasks-*` family) from the score for
+# 2026-07-28 automatically, so they must not be listed here. Run with
+# `--verbose` to see them.
+#
+# Adding an entry is a deliberate act. Every entry needs a reason, an owner, and
+# the condition under which it is removed; an unexplained entry is how a
+# conformance gate stops meaning anything.
+#
+# Format (per the conformance CLI):
+#
+#   server:
+#     - <scenario-id>

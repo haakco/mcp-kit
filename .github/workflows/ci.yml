@@ -11,8 +11,53 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  changes:
+    name: Detect changes
+    runs-on: haakco-build
+    container:
+      image: ghcr.io/haakco/actions-runner:2
+      credentials:
+        username: ${{ github.actor }}
+        password: ${{ secrets.GITHUB_TOKEN }}
+      options: --user root
+    timeout-minutes: 5
+    outputs:
+      go: ${{ steps.filter.outputs.go }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - name: Select suites from the changed paths
+        id: filter
+        # POSIX sh only: the runner's default shell is dash, which has no
+        # `set -o pipefail`, and no step here should depend on bash.
+        run: |
+          set -eu
+          base="${{ github.event.pull_request.base.sha || github.event.before }}"
+          fail() {
+            echo "::error::$1" >&2
+            exit 1
+          }
+          [ -n "$base" ] || fail "No base revision available, so the changed paths cannot be computed."
+          git cat-file -e "${base}^{commit}" 2>/dev/null \
+            || fail "Base revision $base is not in this checkout. Ensure actions/checkout runs with fetch-depth: 0."
+          changed="$(git diff --name-only "$base" HEAD)"
+          [ -n "$changed" ] \
+            || fail "Base revision $base and HEAD have no differences; the diff metadata is inconsistent."
+          # Markdown-only and plan-only changes must not run the Go or conformance suites.
+          non_doc="$(printf '%s\n' "$changed" | grep -vE '\.(md)$' || true)"
+          if [ -z "$non_doc" ]; then
+            echo "Documentation-only change; skipping the Go and conformance suites."
+            echo "go=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          echo "Code change detected; running the Go and conformance suites."
+          echo "go=true" >> "$GITHUB_OUTPUT"
+
   quality:
     name: Quality
+    needs: changes
+    if: needs.changes.outputs.go == 'true'
     runs-on: haakco-build
     container:
       image: ghcr.io/haakco/actions-runner:2
@@ -25,9 +70,43 @@ jobs:
       - uses: actions/checkout@v7
       - uses: actions/setup-go@v6
         with:
-          go-version: "1.26.2"
+          go-version: "1.27.1"
           cache-dependency-path: go.sum
       - name: Install just
         uses: extractions/setup-just@v4
       - name: Quality gate
         run: just quality
+      - name: Vulnerability check
+        run: just vulncheck
+
+  conformance:
+    name: Conformance (MCP 2026-07-28)
+    needs: changes
+    if: needs.changes.outputs.go == 'true'
+    runs-on: haakco-build
+    container:
+      image: ghcr.io/haakco/actions-runner:2
+      credentials:
+        username: ${{ github.actor }}
+        password: ${{ secrets.GITHUB_TOKEN }}
+      options: --user root
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v6
+        with:
+          go-version: "1.27.1"
+          cache-dependency-path: go.sum
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Conformance gate
+        run: ./scripts/conformance/run.sh --results conformance-results
+      - name: Upload conformance results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: conformance-results
+          path: conformance-results
+          if-no-files-found: ignore
+          retention-days: 7

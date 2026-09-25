@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/haakco/mcp-kit/mcpkit"
 	"github.com/haakco/mcp-kit/testkit"
 )
 
@@ -24,22 +25,26 @@ func TestMinimalServerDiscoveryAndToolsList(t *testing.T) {
 
 	server := httptest.NewServer(handler)
 	t.Cleanup(server.Close)
-	sessionID := testkit.RunHandshakeURL(t, server.URL+"/mcp", "example-token")
+	mcpURL := server.URL + "/mcp"
 
-	registered := testkit.ListToolsURL(t, server.URL+"/mcp", "example-token", sessionID)
+	// MCP 2026-07-28 has no initialize handshake: discovery is the first request.
+	discover := testkit.DiscoverURL(t, mcpURL, "example-token")
+	if len(discover.SupportedVersions) != 1 || discover.SupportedVersions[0] != mcpkit.ProtocolVersion {
+		t.Fatalf("supportedVersions = %v, want [%s]", discover.SupportedVersions, mcpkit.ProtocolVersion)
+	}
+
+	registered := testkit.ListToolsURL(t, mcpURL, "example-token")
 	testkit.AssertChecklistCoverage(t, registered, []string{"hello_world"})
 
-	request := httptest.NewRequest(http.MethodPost, "/mcp", strings.NewReader(`{"jsonrpc":"2.0","id":2,"method":"tools/list"}`))
-	request.Header.Set("Authorization", "Bearer example-token")
-	request.Header.Set("Mcp-Session-Id", sessionID)
-	response := httptest.NewRecorder()
-	handler.ServeHTTP(response, request)
-
-	if response.Code != http.StatusOK {
-		t.Fatalf("tools/list status = %d, want 200; body=%s", response.Code, response.Body.String())
+	wire := testkit.Post(t, mcpURL, "example-token", "tools/list", nil)
+	if wire.StatusCode != http.StatusOK {
+		t.Fatalf("tools/list status = %d, want 200; body=%s", wire.StatusCode, wire.Body)
+	}
+	if sessionID := wire.Header.Get("Mcp-Session-Id"); sessionID != "" {
+		t.Fatalf("Mcp-Session-Id = %q, want no session header in stateless mode", sessionID)
 	}
 	var payload map[string]any
-	if err := json.Unmarshal(response.Body.Bytes(), &payload); err != nil {
+	if err := json.Unmarshal(wire.JSON(), &payload); err != nil {
 		t.Fatalf("decode tools/list response: %v", err)
 	}
 	result := payload["result"].(map[string]any)
@@ -47,6 +52,9 @@ func TestMinimalServerDiscoveryAndToolsList(t *testing.T) {
 	tool := tools[0].(map[string]any)
 	if tool["name"] != "hello_world" {
 		t.Fatalf("tool name = %#v, want hello_world", tool["name"])
+	}
+	if result["cacheScope"] != "private" {
+		t.Fatalf("cacheScope = %#v, want private", result["cacheScope"])
 	}
 }
 

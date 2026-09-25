@@ -5,19 +5,24 @@ import (
 	"errors"
 	"testing"
 
+	"github.com/haakco/mcp-kit/mcpkit"
 	"github.com/haakco/mcp-kit/testkit"
 	"github.com/haakco/mcp-kit/userstore"
 )
 
-func TestNewServerMintTokenAndHandshake(t *testing.T) {
+func TestNewServerDiscoversToolsOverStatelessHTTP(t *testing.T) {
 	server := testkit.NewServer(t)
 	token := testkit.MintToken(t, "mcp.read")
 
-	sessionID := testkit.RunHandshake(t, server, token)
-	if sessionID == "" {
-		t.Fatal("sessionID is empty")
+	discover := testkit.Discover(t, server, token)
+	if len(discover.SupportedVersions) != 1 || discover.SupportedVersions[0] != mcpkit.ProtocolVersion {
+		t.Fatalf("supportedVersions = %v, want [%s]", discover.SupportedVersions, mcpkit.ProtocolVersion)
 	}
-	tools := testkit.ListTools(t, server, token, sessionID)
+	if ttlMs, scope := discover.GetTTLMs(), discover.GetCacheScope(); ttlMs <= 0 || scope != "private" {
+		t.Fatalf("discover cache = (%d, %q), want positive ttl and private scope", ttlMs, scope)
+	}
+
+	tools := testkit.ListTools(t, server, token)
 	testkit.AssertChecklistCoverage(t, tools, []string{"hello_world"})
 }
 
