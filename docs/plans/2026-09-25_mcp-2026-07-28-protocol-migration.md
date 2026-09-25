@@ -126,12 +126,26 @@ directly" and "Go 1.26 (toolchain `go1.26.2`) is required". Both are stale: `jus
 4. **The kit does not own MCP header validation.** The SDK's transport validates `Mcp-Method`, `Mcp-Name`, and
    `Mcp-Protocol-Version` and returns `-32020` on mismatch. The kit's job is to not mask that, which is a test, not
    an implementation.
+5. **D1 — modern-only. `SupportedProtocolVersions` is narrowed to `["2026-07-28"]`.** Decided by the owner on
+   2026-09-25, over this plan's original dual-era recommendation. The kit serves one wire era: no `initialize`
+   handshake, no `Mcp-Session-Id`, no legacy fallback, and the testkit teaches only the modern path. Consequences
+   carried through every task below:
 
-### Needs owner sign-off before the task that depends on it
+   - `RunHandshake` loses its meaning entirely, so it is **replaced**, not kept alongside a modern helper. That is a
+     breaking API change for `skills-mcp` and `vorrent`, and it needs a migration note in `CHANGELOG.md` plus an
+     update to both `docs/migration/*.md` contracts.
+   - **A client that speaks only the legacy handshake can no longer connect.** The spec's guidance is that a
+     modern-only server should name the versions it supports in any error it returns to `initialize`, because legacy
+     clients have no fall-forward mechanism. The SDK answers an excluded version with `2025-11-25` so the client
+     disconnects cleanly rather than misreading the reply — verify that observed behaviour, do not assume it.
+   - Conformance is scored against `2026-07-28` only.
+   - Each consumer must confirm its clients are modern before its own upgrade, because the break lands in their
+     deployment, not in this repo.
+
+### Still needs owner sign-off
 
 | # | Decision | Recommendation | Reason |
 |---|---|---|---|
-| **D1** | Dual-era or modern-only? | **Dual-era.** Advertise both `2026-07-28` and the legacy revisions, and let each consumer narrow with the SDK's `SupportedProtocolVersions`. | This is a *library* with live consumers whose clients are third-party and mixed. Unlike a single owned tool, the kit cannot know what its consumers' clients speak, and a library that breaks legacy clients on upgrade forces every consumer into an emergency. The SDK supports both transparently. |
 | **D2** | Keep `Implementation any`, or take the SDK type? | **Take `*mcp.Implementation`** and actually apply it plus `Instructions`. | The module already depends on the SDK via `testkit`, so `any` buys nothing, and 2026-07-28 makes `instructions` spec-visible through `server/discover`. Silently dropping it is now a visible defect. Watch the ~12 method-per-receiver cap (`CG-02`). |
 | **D3** | Replace DCR with CIMD, or add CIMD alongside? | **Add CIMD; demote DCR to the documented fallback.** | The spec deprecates DCR, but real clients still use it. Removing it would break the consumers' current onboarding for a mechanism the spec keeps working during the deprecation window. |
 | **D4** | Who validates the MCP transport headers? | **The SDK**, with kit tests asserting the kit does not interfere. | Header validation is transport behaviour the SDK owns. Re-implementing it in `mcpmw` would duplicate and drift. |
@@ -219,7 +233,7 @@ Plus the Task 3 reference-server test, which is where this behaviour is really p
 **Files:**
 
 - Modify: `testkit/server.go` (delete `handleMCP`; serve the real SDK handler)
-- Modify: `testkit/handshake.go` (era-aware helpers)
+- Modify: `testkit/handshake.go` (replace the session-returning handshake helper with a modern discovery helper)
 - Modify: `testkit/token.go` if the server fixture changes its auth shape
 - Add: `testkit/SDK_VERSION`-style guard or an assertion in `testkit/server_test.go` pinning the advertised revision
 - Modify: `testkit/testkit_test.go`, `mcpkit/server_test.go`
@@ -231,14 +245,13 @@ Plus the Task 3 reference-server test, which is where this behaviour is really p
       the reason the suite could not see this migration.
 - [ ] Make the advertised revision come from the SDK, never a literal. Delete `"2025-03-26"` from
       `testkit/server.go` and `_examples/minimal-server/main.go`.
-- [ ] Replace `RunHandshake` with era-aware helpers. The current signature returns `session.ID()` and callers send
-      `Mcp-Session-Id`; at 2026-07-28 there is no session ID. Provide a modern path (per-request, no session header,
-      no handshake) and a legacy path (handshake + session header), and make the caller state which era it is
-      exercising so no test can silently pass in the wrong era.
+- [ ] Replace `RunHandshake` with a modern-only helper (for example `RunDiscovery`). The current signature returns
+      `session.ID()` and callers send `Mcp-Session-Id`; at 2026-07-28 neither exists. Delete the session plumbing
+      rather than keeping a legacy variant beside it, and record the removal as a breaking change.
 - [ ] Add a test asserting the modern path works with **no** `initialize` and **no** `Mcp-Session-Id`, and that
-      `server/discover` answers with the expected `supportedVersions`.
-- [ ] Add a test asserting the legacy path still works (D1 dual-era), so the fallback the SDK provides is exercised
-      rather than assumed.
+      `server/discover` answers `supportedVersions: ["2026-07-28"]` exactly.
+- [ ] Add a test asserting a legacy `initialize` request does **not** negotiate a legacy session — capture the actual
+      response and record it, so the disconnect behaviour is documented rather than assumed.
 - [ ] Keep the throwaway tools read-only and clearly marked as fixtures; do not ship anything resembling a domain
       tool.
 
@@ -247,7 +260,7 @@ Plus the Task 3 reference-server test, which is where this behaviour is really p
 ```bash
 just test
 go test -run TestDiscovery -v ./testkit/...
-go test -run TestLegacyHandshake -v ./testkit/...
+go test -run TestLegacyInitializeRejected -v ./testkit/...
 ```
 
 ---
@@ -360,9 +373,9 @@ Without this task, every revision claim in the README, `DESIGN.md`, and Task 8's
 - Modify: `docs/cycle-methodology.md`
 
 - [ ] Pin the official CLI exactly: `npx --yes @modelcontextprotocol/conformance@0.1.16`.
-- [ ] Run the frozen per-revision requirement set, not the growing suite:
-      `--requirements 2026-07-28` and, because D1 chose dual-era, `--requirements 2025-11-25` as a **separate**
-      invocation. A scenario in both sets runs differently at each revision's wire, so one run cannot cover both.
+- [ ] Run the frozen per-revision requirement set, not the growing suite: `--requirements 2026-07-28`. Do not add a
+      `2025-11-25` run — D1 made the kit modern-only, so a legacy-scored suite would measure an era the kit
+      deliberately does not serve.
 - [ ] Run it against the Task 3 SDK-backed reference server (that is the only server in this repo that speaks the
       protocol), and document the consumer-facing command in `docs/cycle-methodology.md` so each consumer runs it
       against its own deployment.
@@ -401,11 +414,14 @@ A conformance run that has never failed is not evidence.
       identity/instructions fix, and the OAuth additions.
 - [ ] Correct the stale `AGENTS.md` claims: there *is* a justfile, a `mise.toml`, and CI, and the Go version is
       whatever Task 1 settled on. List the real recipes so the next reader uses `just` instead of raw `go`.
-- [ ] Record D1–D4 in `DESIGN.md`'s decision log, including the dual-era choice and the DCR-as-fallback rationale.
-      `DESIGN.md` is what the next maintainer reads before changing public API.
-- [ ] State the second-order consequence of dual-era support in `README.md`: the kit serves two wire eras, so a
-      consumer's tests must say which era they exercise, and a consumer may narrow with `SupportedProtocolVersions`
-      once its clients allow.
+- [ ] Record D1–D4 in `DESIGN.md`'s decision log: modern-only (D1), the `*mcp.Implementation` change (D2), and the
+      DCR-as-fallback rationale (D3). `DESIGN.md` is what the next maintainer reads before changing public API.
+- [ ] State the consequence of modern-only in `README.md` in the consumer's terms: the kit serves one wire era, a
+      legacy-only client cannot connect, and the migration note names the helper that was replaced and the
+      `SupportedProtocolVersions` value to set. Do not soften this into "dual-era available on request" — the code
+      does not offer it.
+- [ ] Hand the break to the consumers explicitly. `skills-mcp` and `vorrent` each need their own change; a note in
+      this repo's `CHANGELOG.md` is not notification.
 - [ ] State the deprecation-window position: logging, roots, and sampling are deprecated at 2026-07-28 and remain
       functional for at least twelve months, so consumers should migrate off roots/sampling guidance now and expect
       removal later. This is guidance for consumers, not new kit code.
@@ -433,7 +449,7 @@ just conformance
 # Prove the modern path is genuinely modern.
 go test -run TestNoHandshakeNoSession -v ./testkit/...
 go test -run TestDiscoverReportsIdentity -v ./testkit/...
-go test -run TestLegacyHandshake -v ./testkit/...
+go test -run TestLegacyInitializeRejected -v ./testkit/...
 ```
 
 ## Completion Criteria
@@ -441,17 +457,17 @@ go test -run TestLegacyHandshake -v ./testkit/...
 1. `go.mod` pins go-sdk **v1.8.0**; `mise.toml`, `go.mod`, and CI agree on one Go version; `just quality` is green.
 2. The kit's test fixtures serve the **real SDK handler**. No hardcoded protocol revision remains outside
    `CHANGELOG.md` and migration docs.
-3. A modern path is proven with no `initialize`, no `Mcp-Session-Id`, `server/discover` present, and `resultType` on
-   results. A legacy path is proven working (D1 dual-era).
+3. A modern path is proven with no `initialize`, no `Mcp-Session-Id`, `server/discover` answering
+   `supportedVersions: ["2026-07-28"]`, and `resultType` on results. A legacy `initialize` is confirmed to be
+   rejected rather than silently negotiated.
 4. `Config.Implementation` and `Config.Instructions` either take effect or are documented as unimplemented; neither is
    silently discarded.
 5. The envelope rewriter is proven not to mask `-32020`/`-32021`/`-32022`, never emits `-32002`, and still passes 401/
    403 and streaming responses through untouched.
 6. `iss` is emitted **and** validated; `application_type` is required in DCR; CIMD is implemented with DCR documented
    as the fallback.
-7. The official conformance suite passes the frozen `2026-07-28` requirement set (and `2025-11-25` if dual-era is
-   claimed), with any baseline entry naming a specific check and a reason, and a demonstrated failure proving the gate
-   can fail.
+7. The official conformance suite passes the frozen `2026-07-28` requirement set, with any baseline entry naming a
+   specific check and a reason, and a demonstrated failure proving the gate can fail.
 8. `CHANGELOG.md` v0.6.0 carries migration notes; `DESIGN.md` records D1–D4; `AGENTS.md` no longer contradicts the
    repo; the three `docs/migration/*.md` contracts are updated.
 
@@ -459,7 +475,7 @@ go test -run TestLegacyHandshake -v ./testkit/...
 
 | Not doing | Why |
 |---|---|
-| Modern-only support | This is a library with third-party clients behind its consumers. Forcing every consumer to drop legacy clients on upgrade is not a library's call to make. Consumers narrow when their evidence allows it. |
+| Dual-era support | Decided against 2026-09-25. The kit serves `2026-07-28` only; a legacy-only client cannot connect, and each consumer confirms its clients are modern before upgrading. Adding a second wire era back is a deliberate future decision, not a default. |
 | Building the SDK handler inside the kit | The consumer owns the `mcp.Server` and its tools. The kit supplies configuration and middleware. Moving handler construction into the kit would make it a framework and start absorbing domain concerns. |
 | Re-implementing transport header validation | The SDK owns it and returns `-32020`. Duplicating it in `mcpmw` creates two authorities that will diverge. |
 | SQL/DDL, or any change to Ent mixin shape | Not required by this revision. If a Task 6 field needs storage, raise it as a separate scoped change with its own migration. |
