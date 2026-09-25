@@ -3,7 +3,7 @@
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Status:** Superseded 2026-09-25. The applicable metadata, challenge, JWT, JWKS, and deferral work is reconciled into
-[`2026-09-25_mcp-2026-07-28-protocol-migration.md`](2026-09-25_mcp-2026-07-28-protocol-migration.md). The proposed
+[`2026-09-25_mcp-2026-07-28-protocol-migration.md`](../2026-09-25_mcp-2026-07-28-protocol-migration.md). The proposed
 AOA conformance runner is superseded by the official MCP conformance CLI. Do not execute unchecked items here.
 Created 2026-07-06.
 
