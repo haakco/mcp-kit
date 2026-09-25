@@ -29,26 +29,29 @@ jobs:
           fetch-depth: 0
       - name: Select suites from the changed paths
         id: filter
+        # POSIX sh only: the runner's default shell is dash, which has no
+        # `set -o pipefail`, and no step here should depend on bash.
         run: |
-          set -euo pipefail
+          set -eu
           base="${{ github.event.pull_request.base.sha || github.event.before }}"
-          if [ -z "$base" ] || ! git cat-file -e "${base}^{commit}" 2>/dev/null; then
-            echo "No usable base commit; selecting the Go suite." >&2
-            echo "go=true" >> "$GITHUB_OUTPUT"
-            exit 0
-          fi
+          fail() {
+            echo "::error::$1" >&2
+            exit 1
+          }
+          [ -n "$base" ] || fail "No base revision available, so the changed paths cannot be computed."
+          git cat-file -e "${base}^{commit}" 2>/dev/null \
+            || fail "Base revision $base is not in this checkout. Ensure actions/checkout runs with fetch-depth: 0."
           changed="$(git diff --name-only "$base" HEAD)"
-          if [ -z "$changed" ]; then
-            echo "No changed files reported; selecting the Go suite." >&2
-            echo "go=true" >> "$GITHUB_OUTPUT"
-            exit 0
-          fi
-          # Markdown-only and plan-only changes must not run Go or conformance.
-          if ! printf '%s\n' "$changed" | grep -vE '\.(md)$' | grep -q .; then
+          [ -n "$changed" ] \
+            || fail "Base revision $base and HEAD have no differences; the diff metadata is inconsistent."
+          # Markdown-only and plan-only changes must not run the Go or conformance suites.
+          non_doc="$(printf '%s\n' "$changed" | grep -vE '\.(md)$' || true)"
+          if [ -z "$non_doc" ]; then
             echo "Documentation-only change; skipping the Go and conformance suites."
             echo "go=false" >> "$GITHUB_OUTPUT"
             exit 0
           fi
+          echo "Code change detected; running the Go and conformance suites."
           echo "go=true" >> "$GITHUB_OUTPUT"
 
   quality:
