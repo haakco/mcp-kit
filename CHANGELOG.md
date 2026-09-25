@@ -4,7 +4,78 @@ All notable changes to `mcp-kit` are documented here.
 
 The module is pre-1.0. Breaking API changes are allowed between minor versions and must include migration notes.
 
-## Unreleased
+## v0.6.0 - unreleased
+
+MCP revision **2026-07-28** migration. The kit is now modern-only: it targets a single protocol revision, serves
+Streamable HTTP statelessly, and carries per-request metadata instead of the retired initialize handshake. This is a
+breaking pre-1.0 release.
+
+### Breaking changes
+
+- **Go 1.27 is required** (toolchain `go1.27.1`, pinned in `mise.toml` and CI). Consumers must raise their own `go`
+directive; the previous minimum was Go 1.26.
+- **`mcpkit.ErrNotImplemented` was removed.** It was a v0.1.0 stub marker and is no longer referenced anywhere.
+- **`mcpkit.Config.Implementation` and `mcpkit.Config.Instructions` were removed.** They were never read: consumers
+already set identity and instructions on their own `mcp.Server`. Set them on `mcp.NewServer` instead.
+- **`testkit.RunHandshake` and `testkit.RunHandshakeURL` were removed.** MCP 2026-07-28 has no handshake. Use
+`testkit.Discover` / `testkit.DiscoverURL`, which return a `*mcp.DiscoverResult` instead of a session ID.
+- **`testkit.ListTools` / `testkit.ListToolsURL` no longer take a session ID.**
+- **`testkit.NewServer` now serves a real SDK server** restricted to `2026-07-28`, stateless, with explicit empty
+capabilities and private caching. Its hand-written JSON-RPC fixture is gone. Tests that relied on `initialize`,
+`notifications/initialized`, `ping`, or `Mcp-Session-Id` must be rewritten.
+- **Authorization responses now carry `iss`** (RFC 9207). `cliauth` rejects a mismatched `iss` before redeeming the
+code. An issuer that omits `iss` is still accepted, for compatibility with deployments that predate RFC 9207.
+- **Client ID Metadata Documents are resolved by default.** A `client_id` that is an HTTPS URL and is absent from the
+consumer's store is fetched and validated. Set `oauth.Config.ClientIDMetadata.Disabled` to keep registration-only
+behaviour.
+- **Bearer challenges now escape `resource_metadata`.** A metadata URL containing a quote, comma, or backslash no
+longer breaks the `WWW-Authenticate` header structure.
+- **Dependency majors:** `github.com/go-jose/go-jose/v3` → `v4`, `github.com/modelcontextprotocol/go-sdk` v1.6.1 →
+v1.8.0, `golangci-lint` v2.12.2 → v2.14.0, plus current `golang.org/x/*`.
+
+### Migration
+
+1. Raise the consumer module to Go 1.27 and upgrade `github.com/modelcontextprotocol/go-sdk` to v1.8.0.
+2. Build the SDK server with `SupportedProtocolVersions: []string{mcpkit.ProtocolVersion}` and
+   `Capabilities: &mcp.ServerCapabilities{}` (an explicit empty value stops the SDK advertising historical default
+   logging).
+3. Serve it with `mcp.NewStreamableHTTPHandler(..., &mcp.StreamableHTTPOptions{Stateless: true})`. Stateless is
+   mandatory for 2026-07-28 over Streamable HTTP.
+4. Set `SetCacheable: mcpkit.PrivateCache(mcpkit.DefaultCacheTTL)` unless a result is provably identical for every
+   caller.
+5. Allow `Mcp-Protocol-Version`, `Mcp-Method`, and `Mcp-Name` through CORS, and stop exposing `Mcp-Session-Id`.
+6. Delete session/initialize assertions from tests; use `testkit.Discover` and `testkit.ListTools`.
+
+### Added
+
+- `mcpkit.ProtocolVersion` (`"2026-07-28"`), `mcpkit.DefaultCacheTTL`, and `mcpkit.PrivateCache(ttl)` — a ready-made
+  `mcp.ServerOptions.SetCacheable` that marks cacheable results `private`. MCP defaults an absent `cacheScope` to
+  `public`, which is wrong for any authenticated server.
+- `testkit.Post` / `testkit.PostHeaders` / `testkit.Do` / `testkit.Wire` — raw wire-level helpers for asserting the
+  transport contract. `Wire.JSON()` unwraps the SSE framing the transport uses by default.
+- Server-side Client ID Metadata Document resolution (SEP-991) in `oauth`: `oauth.ClientIDMetadataConfig`,
+  `oauth.ClientMetadataPolicy`, and `oauth.ClientIDMetadataFetcher`, plus `storage.ClientMetadataResolver` and
+  `storage.Storage.WithClientMetadataResolver`. Fetches are bounded in time, size, and redirects; loopback, private,
+  link-local, multicast, and unspecified targets are refused after DNS resolution; the validated address is dialled
+  rather than re-resolved; documents are cached with HTTP cache semantics and a bounded in-memory cache.
+- `oauth.Provider.AddIssuerParameter` records the RFC 9207 `iss` parameter on authorization responses.
+- `oauth.AuthorizationServerMetadataConfig.ClientIDMetadataDocumentSupported` and
+  `oidc.DiscoveryConfig.ClientIDMetadataDocumentSupported`, emitted as `client_id_metadata_document_supported`.
+- `testkit.contract_test.go` pins the 2026-07-28 transport contract: POST-only stateless serving, absent session
+  headers, `-32020`/`-32022`/`-32602` error codes, `resultType`/`ttlMs`/`cacheScope`, deterministic list ordering,
+  SEP-2164 missing-resource handling, and draft 2020-12 schemas with local `$ref`.
+
+### Changed
+
+- `oauth/storage.Storage.GetClient` falls back to an optional client metadata resolver after a store miss, so
+  registered clients always win. A metadata URL that cannot be resolved reports an invalid client rather than a server
+  error, and the fetch failure is not echoed to the caller.
+- Bearer challenges escape `resource_metadata` through the same quoting helper used for scope hints.
+
+### Fixed
+
+- `resource_metadata` in `WWW-Authenticate` is now a correctly quoted auth-param; a value containing a quote, comma,
+  or backslash previously terminated the header structure early.
 
 ### Added
 

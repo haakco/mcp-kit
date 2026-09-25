@@ -1,10 +1,51 @@
 # Vorrent Migration Notes
 
-**Last verified:** 2026-05-02
+**Last verified:** 2026-09-26
 **Consumer repo:** `/Volumes/Dev/HaakCo/AiProjects/vorrent`
 **Vorrent migration commit:** `1d6b870d refactor: adopt shared mcp kit`
 **Vorrent closeout commits:** `224c52c6 test: close mcp media blocker coverage`; `3c2596d3 fix: include offline subtitle sidecars`; `f51e78be docs: update offline subtitle package status`
-**Kit version consumed:** `github.com/haakco/mcp-kit v0.3.1-0.20260501225920-376d0b3bc2da`
+**Kit version consumed:** `github.com/haakco/mcp-kit v0.6.0` (previous: `v0.3.1-0.20260501225920-376d0b3bc2da`)
+
+## v0.6.0 — MCP 2026-07-28 rollout
+
+`v0.6.0` moves Vorrent onto MCP revision 2026-07-28, removes the session lifecycle, raises the Go floor to 1.27, and
+drops two `mcpkit.Config` fields.
+
+### Required source changes
+
+1. **Go 1.27.** Vorrent's `go.mod` declares `go 1.26.4`. Raise it to `go 1.27.0`; `v0.6.0` requires it. Keep the
+   existing `replace github.com/jackc/pgx/v5 => ...` in place — it still guards the `ory/pop/v6` transitive range.
+2. **Upgrade the SDK.** `github.com/modelcontextprotocol/go-sdk` v1.6.1 → `v1.8.0`, and `mcp-kit` → `v0.6.0`.
+3. **`mcpkit.Config.Implementation` and `Config.Instructions` are gone.** `internal/api/http_server.go` does not set
+   them, so no replacement is needed; Vorrent already sets both on `mcp.NewServer` in `internal/mcpserver/server.go`.
+4. **Do not remove `DisableLocalhostProtection`.** An earlier plan revision claimed v1.8.0 dropped it. It did not: the
+   field still exists on `StreamableHTTPOptions` and `SSEHandlerOptions`, and the conformance suite has a
+   `dns-rebinding-protection` scenario that expects the protection on. Leave it as-is; removing it would weaken
+   localhost/DNS-rebinding protection to make a test pass.
+5. **Pin the revision and capabilities.** In `internal/mcpserver/server.go`, add
+   `SupportedProtocolVersions: []string{mcpkit.ProtocolVersion}` and `Capabilities: &mcp.ServerCapabilities{}` to the
+   `mcp.NewServer` options. The explicit empty value stops the SDK advertising the deprecated default logging
+   capability.
+6. **Cache policy.** Add `SetCacheable: mcpkit.PrivateCache(mcpkit.DefaultCacheTTL)`. Every Vorrent MCP result is
+   authenticated and caller-varying.
+7. **Stateless transport.** In `internal/api/http_server.go`, the SDK handler passed to `mcpkit.New` must be built with
+   `&mcp.StreamableHTTPOptions{Stateless: true}`. Per-request construction (needed for the dynamic audience) is
+   compatible with stateless mode; sessions are not.
+8. **CORS.** Allow `Mcp-Protocol-Version`, `Mcp-Method`, and `Mcp-Name` in `internal/api/http_helpers.go`; add
+   `Mcp-Param-*` only if a tool annotates an input with `x-mcp-header`. Stop exposing `Mcp-Session-Id`.
+9. **Tests and probes.** Remove `initialize`, `notifications/initialized`, `ping`, and `Mcp-Session-Id` expectations.
+   Rewrite the `PR-02`-style live probe around `server/discover` then `tools/list`.
+10. **CIMD.** Metadata documents are resolved by default. Set `oauth.ClientIDMetadata.Disabled` and
+    `oidc.DiscoveryConfig.ClientIDMetadataDocumentSupported = false` together if Vorrent must stay registration-only.
+
+### Rollout order
+
+Vorrent goes last because it depends on the tagged release:
+
+1. Kit `v0.6.0` is tagged only after `skills-mcp` has proved the same commit in its real deployment.
+2. Upgrade Vorrent to the tag, prove locally (boundary suites plus conformance), commit, push.
+3. With owner approval, deploy and run the authenticated `server/discover` + `tools/list` probe and the OAuth recovery
+   probe.
 
 ## What Changed
 
@@ -64,7 +105,7 @@ Vorrent verification that passed during the migration:
 - Live OAuth metadata and dynamic client registration against a running kit-backed Vorrent server.
 - Authorization-code grant and refresh-token grant.
 - Unauthenticated `/mcp` kit bearer challenge.
-- MCP initialize and `tools/list`, `resources/list`, `prompts/list`.
+- MCP `server/discover` and `tools/list`, `resources/list`, `prompts/list` on the 2026-07-28 wire;
 - Safe tool calls, resource reads, prompt reads, error envelopes, and read-only token write denial.
 - MCP Inspector CLI rendered all 14 tool schemas.
 - Codex `mcp login vorrent-mcp` completed through browser OAuth approval driven by Playwright MCP.
@@ -84,3 +125,6 @@ No Vorrent destructive/fixture-heavy migration blocker remains open. The final V
 - Vorrent computes the MCP OAuth resource dynamically from the request host. Do not mix `localhost` and `127.0.0.1` in the same OAuth token flow unless the audience/resource is intentionally changed.
 - Vorrent's real user database may have no users. For local OAuth testing, create or reset a local admin user before opening the authorization URL.
 - Project-scoped `.mcp.json` should not include shared bearer-token placeholders. Vorrent removed the project `skills-http` entry that referenced `${SKILLS_BEARER_TOKEN}`; keep secret-bearing Skills HTTP config in local user config.
+- `v0.6.0`: a 2026-07-28 request against a stateful handler fails with `-32022`. Check `Stateless: true` first.
+- `v0.6.0`: `-32020` means a `Mcp-Method` / `Mcp-Name` / `Mcp-Protocol-Version` header disagrees with the body, not
+  that auth failed.

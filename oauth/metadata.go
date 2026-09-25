@@ -23,6 +23,10 @@ type AuthorizationServerMetadataConfig struct {
 	Resource              string
 	ResourceMetadataURL   string
 	ScopesSupported       []string
+
+	// ClientIDMetadataDocumentSupported advertises SEP-991 Client ID Metadata
+	// Document support. Set it when the provider resolves metadata documents.
+	ClientIDMetadataDocumentSupported bool
 }
 
 type protectedResourceMetadata struct {
@@ -34,18 +38,19 @@ type protectedResourceMetadata struct {
 }
 
 type authorizationServerMetadata struct {
-	Issuer                        string   `json:"issuer"`
-	AuthorizationEndpoint         string   `json:"authorization_endpoint"`
-	TokenEndpoint                 string   `json:"token_endpoint"`
-	RegistrationEndpoint          string   `json:"registration_endpoint,omitempty"`
-	Resource                      string   `json:"resource,omitempty"`
-	ResourceMetadataURL           string   `json:"resource_metadata,omitempty"`
-	GrantTypesSupported           []string `json:"grant_types_supported"`
-	ResponseTypesSupported        []string `json:"response_types_supported"`
-	ResponseModesSupported        []string `json:"response_modes_supported"`
-	CodeChallengeMethodsSupported []string `json:"code_challenge_methods_supported"`
-	TokenEndpointAuthMethods      []string `json:"token_endpoint_auth_methods_supported"`
-	ScopesSupported               []string `json:"scopes_supported,omitempty"`
+	Issuer                            string   `json:"issuer"`
+	AuthorizationEndpoint             string   `json:"authorization_endpoint"`
+	TokenEndpoint                     string   `json:"token_endpoint"`
+	RegistrationEndpoint              string   `json:"registration_endpoint,omitempty"`
+	Resource                          string   `json:"resource,omitempty"`
+	ResourceMetadataURL               string   `json:"resource_metadata,omitempty"`
+	ClientIDMetadataDocumentSupported bool     `json:"client_id_metadata_document_supported,omitempty"`
+	GrantTypesSupported               []string `json:"grant_types_supported"`
+	ResponseTypesSupported            []string `json:"response_types_supported"`
+	ResponseModesSupported            []string `json:"response_modes_supported"`
+	CodeChallengeMethodsSupported     []string `json:"code_challenge_methods_supported"`
+	TokenEndpointAuthMethods          []string `json:"token_endpoint_auth_methods_supported"`
+	ScopesSupported                   []string `json:"scopes_supported,omitempty"`
 }
 
 // ProtectedResourceMetadataHandler returns an RFC 9728 metadata handler.
@@ -73,18 +78,19 @@ func AuthorizationServerMetadataHandler(cfg AuthorizationServerMetadataConfig) h
 			return
 		}
 		writeMetadataJSON(w, authorizationServerMetadata{
-			Issuer:                        cfg.Issuer,
-			AuthorizationEndpoint:         cfg.AuthorizationEndpoint,
-			TokenEndpoint:                 cfg.TokenEndpoint,
-			RegistrationEndpoint:          cfg.RegistrationEndpoint,
-			Resource:                      cfg.Resource,
-			ResourceMetadataURL:           cfg.ResourceMetadataURL,
-			GrantTypesSupported:           []string{"authorization_code", "refresh_token"},
-			ResponseTypesSupported:        []string{"code"},
-			ResponseModesSupported:        []string{"query"},
-			CodeChallengeMethodsSupported: []string{"S256"},
-			TokenEndpointAuthMethods:      []string{authMethodNone, authMethodClientSecretBasic, authMethodClientSecretPost},
-			ScopesSupported:               append([]string{}, cfg.ScopesSupported...),
+			Issuer:                            cfg.Issuer,
+			AuthorizationEndpoint:             cfg.AuthorizationEndpoint,
+			TokenEndpoint:                     cfg.TokenEndpoint,
+			RegistrationEndpoint:              cfg.RegistrationEndpoint,
+			Resource:                          cfg.Resource,
+			ResourceMetadataURL:               cfg.ResourceMetadataURL,
+			ClientIDMetadataDocumentSupported: cfg.ClientIDMetadataDocumentSupported,
+			GrantTypesSupported:               []string{"authorization_code", "refresh_token"},
+			ResponseTypesSupported:            []string{"code"},
+			ResponseModesSupported:            []string{"query"},
+			CodeChallengeMethodsSupported:     []string{"S256"},
+			TokenEndpointAuthMethods:          []string{authMethodNone, authMethodClientSecretBasic, authMethodClientSecretPost},
+			ScopesSupported:                   append([]string{}, cfg.ScopesSupported...),
 		})
 	})
 }

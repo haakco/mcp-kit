@@ -30,59 +30,65 @@ Expected confirmation:
 
 ## Reusable Probes
 
-### PR-01 - Anonymous initialize is rejected
+### PR-01 - Anonymous request is rejected
 
 Purpose: catch accidental auth bypass regressions.
 
 ```bash
 curl -i -X POST "$MCP_BASE_URL/mcp" \
   -H 'Content-Type: application/json' \
-  -d '{"jsonrpc":"2.0","id":1,"method":"initialize"}'
+  -H 'Accept: application/json, text/event-stream' \
+  -d '{"jsonrpc":"2.0","id":1,"method":"server/discover","params":{"_meta":{"io.modelcontextprotocol/protocolVersion":"2026-07-28","io.modelcontextprotocol/clientCapabilities":{}}}}'
 ```
 
-Expected: HTTP `401` with a bearer challenge when auth is enabled.
+Expected: HTTP `401` with a bearer challenge when auth is enabled. On MCP 2026-07-28 the first request a client makes
+is `server/discover`; there is no `initialize` to probe with.
 
-### PR-02 - Authenticated handshake to tools/list
+### PR-02 - Authenticated discovery and tools/list
 
-Purpose: prove protocol, auth, and registry are all working together.
+Purpose: prove protocol, auth, and registry are all working together on the 2026-07-28 wire.
 
 Setup: a valid bearer token from the OAuth token endpoint.
 
 ```bash
+# 1. Discovery. No initialize, no notifications/initialized, no session.
 curl -fsSi -X POST "$MCP_BASE_URL/mcp" \
   -H "Origin: $MCP_ORIGIN" \
   -H 'Content-Type: application/json' \
   -H 'Accept: application/json, text/event-stream' \
   -H "Authorization: Bearer $TOKEN" \
-  -d '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-03-26","capabilities":{},"clientInfo":{"name":"manual-test","version":"0"}}}' \
-  > /tmp/mcp-init.txt
+  -H 'Mcp-Protocol-Version: 2026-07-28' \
+  -H 'Mcp-Method: server/discover' \
+  -d '{"jsonrpc":"2.0","id":1,"method":"server/discover","params":{"_meta":{"io.modelcontextprotocol/protocolVersion":"2026-07-28","io.modelcontextprotocol/clientCapabilities":{}}}}'
 
-SESSION=$(grep -i '^mcp-session-id:' /tmp/mcp-init.txt | awk '{print $2}' | tr -d '\r')
-
+# 2. The real request. Each POST is self-contained.
 curl -fsS -X POST "$MCP_BASE_URL/mcp" \
   -H "Origin: $MCP_ORIGIN" \
   -H 'Content-Type: application/json' \
   -H 'Accept: application/json, text/event-stream' \
   -H "Authorization: Bearer $TOKEN" \
-  -H "Mcp-Session-Id: $SESSION" \
-  -d '{"jsonrpc":"2.0","method":"notifications/initialized"}'
-
-curl -fsS -X POST "$MCP_BASE_URL/mcp" \
-  -H "Origin: $MCP_ORIGIN" \
-  -H 'Content-Type: application/json' \
-  -H 'Accept: application/json, text/event-stream' \
-  -H "Authorization: Bearer $TOKEN" \
-  -H "Mcp-Session-Id: $SESSION" \
-  -d '{"jsonrpc":"2.0","id":2,"method":"tools/list"}'
+  -H 'Mcp-Protocol-Version: 2026-07-28' \
+  -H 'Mcp-Method: tools/list' \
+  -d '{"jsonrpc":"2.0","id":2,"method":"tools/list","params":{"_meta":{"io.modelcontextprotocol/protocolVersion":"2026-07-28","io.modelcontextprotocol/clientCapabilities":{}}}}'
 ```
 
-Expected: `tools/list` returns the consumer's documented tool inventory.
+Assert on the discover response:
+
+- `supportedVersions` is exactly `["2026-07-28"]`.
+- No `Mcp-Session-Id` response header appears.
+- `resultType` is `complete`, and `ttlMs` / `cacheScope` are present.
+
+`tools/list` must return the consumer's documented tool inventory.
+
+Named methods additionally require `Mcp-Name` (`resources/read`, `prompts/get`, `tools/call`); omitting it returns
+`-32020`.
 
 ### PR-03 - Origin allowlist enforcement
 
 Purpose: catch browser-origin regressions.
 
-Run the same authenticated `initialize` request once with an allowed `Origin` and once with a disallowed `Origin`.
+Run the same authenticated `server/discover` request once with an allowed `Origin` and once with a disallowed
+`Origin`.
 
 Expected:
 
@@ -155,6 +161,39 @@ timeline without storing token values. Audit every request, including followers
 coalesced behind `singleflight`; otherwise concurrent stale-token use is silently
 undercounted.
 
+### OG-11 - Client ID Metadata Documents are a server-side fetch of caller-supplied URLs
+
+MCP 2026-07-28 prefers Client ID Metadata Documents (SEP-991): the client's `client_id` is an HTTPS URL, and the
+authorization server fetches that URL to learn the client's metadata. The fetch is the whole risk. A working
+implementation needs, at minimum:
+
+- an exact match between the document's `client_id` and the URL it was served from, or one host can serve metadata for
+  another's identity;
+- loopback, private, link-local, multicast, and unspecified targets refused **after** DNS resolution, with the resolved
+  address dialled rather than re-resolved;
+- bounded time, response size, and redirect count, each redirect re-validated;
+- no credentials or fragment in the URL, and a non-root path;
+- a scope claim intersected with what the server serves, so a document cannot widen its own access.
+
+Correct alternatives include a single well-tested implementation reused by every server in the fleet, or a validated
+third-party client. A hand-rolled fetch that skips the resolution check is an SSRF hole reachable by anyone who can
+start an authorization flow.
+
+`oauth.ClientIDMetadataFetcher` is the kit's implementation, and `oauth/cimd_test.go` covers each bound above.
+
+### OG-12 - Authorization responses need `iss`
+
+RFC 9207 adds `iss` to the authorization response so a client can confirm the response came from the issuer it started
+the flow with before redeeming the code. Fosite does not emit it, so the kit adds it explicitly in both authorize
+handlers. `cliauth` rejects a mismatched `iss` before token exchange, and accepts a missing one for compatibility with
+issuers that predate the RFC.
+
+### OG-13 - Bearer challenge auth-params must be quoted
+
+`WWW-Authenticate` auth-params are quoted strings, and clients split them on commas. A `resource_metadata` URL
+containing a comma, quote, or backslash breaks the header structure and can truncate or forge later parameters. Every
+interpolated value goes through one quoting helper; the earlier code quoted the scope hint but not the metadata URL.
+
 ## JSON-RPC Envelope Traps
 
 ### JR-01 - Echo request IDs exactly
@@ -181,15 +220,71 @@ Accept: application/json, text/event-stream
 
 When the response is SSE, parse the `data:` line before decoding JSON.
 
-### TQ-02 - The MCP handshake is three steps
+### TQ-02 - MCP 2026-07-28 has no handshake
 
-The canonical sequence is:
+The legacy sequence was `initialize` → `notifications/initialized` → first real request, all sharing an
+`Mcp-Session-Id`. Under 2026-07-28 (SEP-2575) that is gone:
 
-1. `initialize`
-2. `notifications/initialized`
-3. First real request, such as `tools/list`
+1. `server/discover` — one POST, no session, negotiated inline.
+2. Any request, each self-contained.
 
-Use the same `Mcp-Session-Id` for steps 2 and 3.
+Every request carries `_meta["io.modelcontextprotocol/protocolVersion"]` and
+`_meta["io.modelcontextprotocol/clientCapabilities"]`, and HTTP requests mirror the version in
+`Mcp-Protocol-Version` and the method in `Mcp-Method`. `tools/call`, `resources/read`, and `prompts/get` also need
+`Mcp-Name`. A body/header disagreement is `-32020`.
+
+Streamable HTTP must be served with `StreamableHTTPOptions{Stateless: true}`. A non-stateless handler rejects a
+2026-07-28 request outright. In stateless mode GET and DELETE return `405` with `Allow: POST`, and `Mcp-Session-Id` is
+neither required nor emitted.
+
+`ping` is removed: the server answers `-32601`. Do not enable `ServerOptions.KeepAlive`.
+
+### TQ-04 - Unsupported *legacy* protocol versions get plain text, not `-32022`
+
+For a requested version **at or after** 2026-07-28 the SDK returns a proper JSON-RPC error:
+
+```json
+{"error":{"code":-32022,"message":"unsupported protocol version","data":{"supported":["2026-07-28"],"requested":"2027-01-01"}}}
+```
+
+For a requested version **before** 2026-07-28 the rejection happens during HTTP transport setup, before the JSON-RPC
+layer, and the body is `text/plain`:
+
+```text
+Bad Request: Unsupported protocol version (supported versions: 2026-07-28)
+```
+
+A modern-only server therefore answers a stale legacy client with a body that client cannot parse, so it cannot learn
+the supported versions and retry. `testkit/contract_test.go`
+(`TestLegacyProtocolVersionHeaderGetsPlainTextRejection`) pins this so a fix is visible. Closing it means teaching
+`mcpmw.Envelope` about supported revisions, which changes that middleware's public signature; treat it as its own
+change rather than smuggling it into a migration.
+
+### TQ-05 - `-32021` has no server-side producer in the Go SDK
+
+`mcp.CodeMissingRequiredClientCapabilities` (`-32021`) and `MissingRequiredClientCapabilityData` exist, and the
+conformance suite defines the behaviour, but the SDK never returns that code on its own: it is reached only through a
+reference-server diagnostic tool. Do not claim `-32021` coverage from SDK behaviour alone.
+
+### TQ-06 - The SDK now emits JSON-RPC for errors the kit's envelope used to rewrite
+
+Against SDK v1.8.0 the cases `mcpmw.Envelope` was written for arrive as proper JSON-RPC, not plain text:
+
+| Request | Response |
+|---|---|
+| malformed JSON body | `200` + `-32700` |
+| missing `id` | `200` + `-32600` |
+| unknown method | `404` + `-32601` (SEP-2575 requires 404) |
+
+`Envelope` only rewrites `400` + `text/plain`, so those rules are unreachable for SDK-backed handlers and the
+middleware is a no-op there. Keep it for non-SDK handlers and for the plain-text rejections that remain (an empty POST
+body, and legacy protocol versions per TQ-04), and do not assume it is doing work it is not.
+
+### TQ-07 - HTTP status is part of the contract, not decoration
+
+SEP-2575 pins statuses clients depend on: `404` for unknown or removed methods, and `400` for `-32020`, `-32021`,
+`-32022`, and `-32602`. Middleware that normalises error bodies must not also rewrite the status, or a client cannot
+tell a protocol rejection from a transport failure. `testkit/contract_test.go` asserts both.
 
 ### TQ-03 - Rebuild before filing binary-behavior bugs
 

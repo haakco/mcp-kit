@@ -49,6 +49,57 @@ func TestJWKSIncludesActiveAndRetiredKeys(t *testing.T) {
 	}
 }
 
+func TestJWKSNeverPublishesPrivateKeyMaterial(t *testing.T) {
+	manager := keys.NewManager(&memoryKeyStore{})
+	if _, err := manager.EnsureSigningKey(t.Context()); err != nil {
+		t.Fatalf("EnsureSigningKey() error = %v", err)
+	}
+	if _, err := manager.RotateSigningKey(t.Context(), time.Hour); err != nil {
+		t.Fatalf("RotateSigningKey() error = %v", err)
+	}
+
+	response := httptest.NewRecorder()
+	oidc.JWKSHandler(manager).ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/.well-known/jwks.json", nil))
+	if response.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", response.Code)
+	}
+
+	var payload struct {
+		Keys []map[string]any `json:"keys"`
+	}
+	if err := json.Unmarshal(response.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("decode JWKS: %v", err)
+	}
+	if len(payload.Keys) == 0 {
+		t.Fatal("JWKS has no keys")
+	}
+
+	// RSA private parameters and symmetric key material must never be published,
+	// and every key must be an RSA signing key with the advertised algorithm.
+	forbidden := []string{"d", "p", "q", "dp", "dq", "qi", "oth", "k", "priv", "privateKey"}
+	for i, key := range payload.Keys {
+		for _, name := range forbidden {
+			if _, present := key[name]; present {
+				t.Errorf("key %d publishes private field %q", i, name)
+			}
+		}
+		if key["kty"] != "RSA" {
+			t.Errorf("key %d kty = %v, want RSA", i, key["kty"])
+		}
+		if key["alg"] != keys.SigningAlgorithm {
+			t.Errorf("key %d alg = %v, want %s", i, key["alg"], keys.SigningAlgorithm)
+		}
+		if key["use"] != keys.KeyUseSignature {
+			t.Errorf("key %d use = %v, want %s", i, key["use"], keys.KeyUseSignature)
+		}
+		for _, public := range []string{"n", "e"} {
+			if _, present := key[public]; !present {
+				t.Errorf("key %d is missing public field %q", i, public)
+			}
+		}
+	}
+}
+
 func TestJWKSRejectsNonGET(t *testing.T) {
 	manager := keys.NewManager(&memoryKeyStore{})
 	response := httptest.NewRecorder()

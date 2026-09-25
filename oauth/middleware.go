@@ -252,7 +252,7 @@ func extractBearerToken(r *http.Request) string {
 func writeBearerChallenge(w http.ResponseWriter, resourceMetadataURL string, requiredScope string, status int) {
 	challenge := `Bearer realm="OAuth"`
 	if resourceMetadataURL != "" {
-		challenge += `, resource_metadata="` + resourceMetadataURL + `"`
+		challenge += `, resource_metadata="` + quoteAuthParam(resourceMetadataURL) + `"`
 	}
 
 	w.Header().Set("WWW-Authenticate", challenge)

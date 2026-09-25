@@ -129,7 +129,7 @@ mcp-kit/
 ├── testkit/                            # Test helpers for consumers
 │   ├── server.go                       # Spin up a kit-backed MCP server in-memory
 │   ├── token.go                        # Mint test tokens without going through the full OAuth flow
-│   ├── handshake.go                    # Run the 3-step Streamable HTTP handshake
+│   ├── discover.go                     # server/discover and raw 2026-07-28 wire helpers (Post, Do, Wire)
 │   └── *_test.go
 │
 └── docs/                               # Long-form docs
@@ -400,10 +400,15 @@ func main() {
     if err != nil { panic(err) }
 
     // Construct the consumer-owned SDK server and wrap its handler with the kit.
-    sdkServer := mcp.NewServer(&mcp.Implementation{Name: "my-mcp", Version: "0.1.0"}, nil)
+    // The kit is modern-only: one revision, stateless.
+    sdkServer := mcp.NewServer(&mcp.Implementation{Name: "my-mcp", Version: "0.1.0"}, &mcp.ServerOptions{
+        Capabilities:              &mcp.ServerCapabilities{},
+        SupportedProtocolVersions: []string{mcpkit.ProtocolVersion},
+        SetCacheable:              mcpkit.PrivateCache(mcpkit.DefaultCacheTTL),
+    })
     sdkHandler := mcp.NewStreamableHTTPHandler(func(*http.Request) *mcp.Server {
         return sdkServer
-    }, nil)
+    }, &mcp.StreamableHTTPOptions{Stateless: true})
     mcpServer, err := mcpkit.New(mcpkit.Config{
         Handler: sdkHandler,
         Bearer: mcpkit.BearerConfig{
@@ -511,7 +516,9 @@ Net: meridian writes ~600 lines of glue + tool registration, gets the full OAuth
 | **v0.2.0** | OAuth core extracted from skills-mcp: provider, storage (Ent), discovery, JWKS, key rotation, PAT, login classifier. Consumer interfaces implemented and tested with in-memory fixtures. | All `oauth/*` tests pass; example consumer in `_examples/minimal-server/` boots and serves `tools/list` against a kit-issued token. |
 | **v0.3.0** | skills-mcp migrated. Kit's API survives a real consumer. Cycle methodology + lessons-learned ported into kit docs. | skills-mcp's `verify-mcp-clients` green against kit-backed binary. |
 | **v0.4.0** | vorrent migrated. Kit serves two consumers. Any drift between vorrent's needs and skills-mcp's needs is reconciled. | vorrent cycle 2 (real-client gates against kit binary) green. |
-| **v1.0.0** | meridian on kit. Three consumers, stable API, full docs. Public release. | All three consumers' test suites green; SemVer commitment from this point. |
+| **v0.5.x** | Consent helpers, OAuth/PAT scope targeting, refresh-replay correlation, discovery and metadata hardening. | Consumer test suites green. |
+| **v0.6.0** | MCP 2026-07-28 migration: modern-only, stateless Streamable HTTP, private-by-default caching, Client ID Metadata Documents, RFC 9207 `iss`, official conformance gate. Removes `mcpkit.Config.Implementation`/`Instructions`/`ErrNotImplemented`; requires Go 1.27 and SDK v1.8.0. | Kit green (unit, race, lint, vulncheck, conformance); `skills-mcp` proves the candidate commit in its real deployment before the tag. |
+| **v1.0.0** | Stable API. Deferred until the consumers have operated on the 2026-07-28 wire and Meridian has an owner and a checkout. | All consumers' test suites green; SemVer commitment from this point. |
 
 Pre-1.0 releases are **breaking-change permitted between minor versions** but every break is documented in CHANGELOG with migration notes.
 
@@ -530,7 +537,7 @@ The kit is Go-only, but several patterns transfer to Laravel and any future MCP 
 | Discovery via prompts and tools | `haakco-mcp-server-design` skill | ✅ Yes |
 | OAuth signing-key rotation cadence (90d/48h) | `mcp-kit/oauth/keys/` and `haakco-mcp-server-design` skill | ✅ Concept yes, implementation Go-only |
 | PKCE base64url substitution rule | `mcp-kit/cliauth/pkce.go` and `haakco-mcp-server-design` skill | ✅ Yes — same rule in any language |
-| Streamable HTTP 3-step handshake | `haakco-mcp-server-design` skill, `haakco-mcp-plugins` skill | ✅ Yes |
+| Stateless Streamable HTTP with `server/discover` | `haakco-mcp-server-design` skill, `haakco-mcp-plugins` skill | ✅ Yes |
 | `authorization_servers` = issuer URL (not metadata URL) | `haakco-mcp-server-design` skill | ✅ Yes |
 | Rebuild-before-filing-SDK-bugs | `haakco-mcp-server-design` skill | ✅ Yes |
 

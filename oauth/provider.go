@@ -65,7 +65,7 @@ func New(cfg Config) (*Provider, error) {
 	}
 	fositeProvider := compose.Compose(
 		fositeConfig,
-		storage.New(cfg.Store),
+		newOAuthStorage(cfg),
 		strategy,
 		compose.OAuth2AuthorizeExplicitFactory,
 		compose.OAuth2RefreshTokenGrantFactory,
@@ -94,6 +94,25 @@ func New(cfg Config) (*Provider, error) {
 // OAuth2Provider exposes the underlying Fosite provider for advanced consumers.
 func (p *Provider) OAuth2Provider() fosite.OAuth2Provider {
 	return p.oauth
+}
+
+// newOAuthStorage builds the Fosite storage adapter, attaching the Client ID
+// Metadata Document resolver unless the consumer disabled it.
+func newOAuthStorage(cfg Config) *storage.Storage {
+	adapter := storage.New(cfg.Store)
+	if cfg.ClientIDMetadata.Disabled {
+		return adapter
+	}
+	fetcher := NewClientIDMetadataFetcher(
+		cfg.ClientIDMetadata,
+		ClientMetadataPolicy{
+			Audience:      cfg.Audience,
+			AllowedScopes: cfg.AllowedScopes,
+			DefaultScopes: cfg.DefaultScopes,
+		},
+		cfg.Now,
+	)
+	return adapter.WithClientMetadataResolver(fetcher)
 }
 
 // RegisterHandler returns the dynamic client registration handler.

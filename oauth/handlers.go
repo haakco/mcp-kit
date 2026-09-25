@@ -15,6 +15,21 @@ import (
 
 const maxTokenFormBytes = 1 << 20
 
+// AddIssuerParameter records the RFC 9207 `iss` parameter on a successful
+// authorization response.
+//
+// Fosite does not emit `iss` itself. Without it a client cannot tell that the
+// authorization response came from the issuer it started the flow with, so a
+// malicious or misconfigured authorization server could hand a code to a
+// client expecting a different one. Both of the kit's authorize handlers call
+// this before writing the response.
+func (p *Provider) AddIssuerParameter(response fosite.AuthorizeResponder) {
+	if p.issuer == "" {
+		return
+	}
+	response.AddParameter("iss", p.issuer)
+}
+
 // SubjectResolver returns the authenticated subject for an authorize request.
 type SubjectResolver func(r *http.Request) (Subject, error)
 
@@ -60,6 +75,7 @@ func (p *Provider) AuthorizeHandler(resolve SubjectResolver) http.Handler {
 			p.oauth.WriteAuthorizeError(ctx, w, requester, err)
 			return
 		}
+		p.AddIssuerParameter(response)
 		p.oauth.WriteAuthorizeResponse(ctx, w, requester, response)
 	})
 }

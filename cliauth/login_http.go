@@ -76,6 +76,7 @@ type loopbackCallbackResult struct {
 	code  string
 	err   error
 	state string
+	iss   string
 }
 
 func startLoopbackCallback(listener net.Listener) (<-chan loopbackCallbackResult, *http.Server) {
@@ -90,7 +91,7 @@ func startLoopbackCallback(listener net.Listener) (<-chan loopbackCallbackResult
 			return
 		}
 		_, _ = fmt.Fprint(w, callbackSuccessPage)
-		resCh <- loopbackCallbackResult{code: q.Get("code"), state: q.Get("state")}
+		resCh <- loopbackCallbackResult{code: q.Get("code"), state: q.Get("state"), iss: q.Get("iss")}
 	})
 	srv := &http.Server{Handler: mux, ReadHeaderTimeout: 5 * time.Second}
 	go func() {
@@ -101,34 +102,34 @@ func startLoopbackCallback(listener net.Listener) (<-chan loopbackCallbackResult
 	return resCh, srv
 }
 
-func readPastedRedirect(in io.Reader, expectedState string) (string, error) {
+func readPastedRedirect(in io.Reader, expectedState string) (code string, iss string, err error) {
 	scanner := bufio.NewScanner(in)
 	if !scanner.Scan() {
 		if err := scanner.Err(); err != nil {
-			return "", fmt.Errorf("read paste: %w", err)
+			return "", "", fmt.Errorf("read paste: %w", err)
 		}
-		return "", errors.New("no input received")
+		return "", "", errors.New("no input received")
 	}
 	pasted := strings.TrimSpace(scanner.Text())
 	if pasted == "" {
-		return "", errors.New("pasted URL is empty")
+		return "", "", errors.New("pasted URL is empty")
 	}
 	parsed, err := url.Parse(pasted)
 	if err != nil {
-		return "", fmt.Errorf("parse pasted URL: %w", err)
+		return "", "", fmt.Errorf("parse pasted URL: %w", err)
 	}
 	q := parsed.Query()
 	if errCode := q.Get("error"); errCode != "" {
-		return "", fmt.Errorf("authorize error: %s: %s", errCode, q.Get("error_description"))
+		return "", "", fmt.Errorf("authorize error: %s: %s", errCode, q.Get("error_description"))
 	}
 	if got := q.Get("state"); got != expectedState {
-		return "", fmt.Errorf("state mismatch: got %q want %q", got, expectedState)
+		return "", "", fmt.Errorf("state mismatch: got %q want %q", got, expectedState)
 	}
-	code := q.Get("code")
+	code = q.Get("code")
 	if code == "" {
-		return "", errors.New("pasted URL has no ?code parameter")
+		return "", "", errors.New("pasted URL has no ?code parameter")
 	}
-	return code, nil
+	return code, q.Get("iss"), nil
 }
 
 // CallbackPort returns a TCP port from addr when available.

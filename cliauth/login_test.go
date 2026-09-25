@@ -45,6 +45,9 @@ type fakeAuthServer struct {
 	exchanged   bool
 	refreshHits int
 	dcrCalls    int
+	// issOverrides the RFC 9207 `iss` the authorize endpoint sends. Empty means
+	// the server's own URL, which is the correct value.
+	issOverride string
 }
 
 func newFakeAuthServer(t *testing.T) *fakeAuthServer {
@@ -96,11 +99,16 @@ func newFakeAuthServer(t *testing.T) *fakeAuthServer {
 		f.state = r.URL.Query().Get("state")
 		f.pkceChall = r.URL.Query().Get("code_challenge")
 		redirect := r.URL.Query().Get("redirect_uri")
+		iss := f.server.URL
+		if f.issOverride != "" {
+			iss = f.issOverride
+		}
 		f.mu.Unlock()
 		callback, _ := url.Parse(redirect)
 		q := callback.Query()
 		q.Set("code", f.codeIssued)
 		q.Set("state", f.state)
+		q.Set("iss", iss)
 		callback.RawQuery = q.Encode()
 		http.Redirect(w, r, callback.String(), http.StatusFound)
 	})
@@ -325,6 +333,40 @@ func TestLogin_Paste_HappyPath(t *testing.T) {
 	}
 	if !strings.Contains(out.String(), "Open this URL") {
 		t.Fatalf("expected paste prompt in output, got %q", out.String())
+	}
+}
+
+func TestLogin_Paste_RejectsIssuerMismatchBeforeTokenExchange(t *testing.T) {
+	fake := newFakeAuthServer(t)
+	fake.issOverride = "https://evil.example.test"
+	login, _ := newTestLogin(t, fake.server.URL)
+	capturedCh := make(chan string, 1)
+	login.OpenURL = func(authURL string) error {
+		capturedCh <- authURL
+		return nil
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	err := login.RunPasteRedirect(ctx, cliauth.PasteOptions{
+		Port:  8765,
+		Scope: "skills.read",
+		In:    newSimulatedPaste(t, capturedCh),
+		Out:   &bytes.Buffer{},
+	})
+	if err == nil {
+		t.Fatal("RunPasteRedirect accepted a mismatched iss, want rejection")
+	}
+	if !strings.Contains(err.Error(), "issuer mismatch") {
+		t.Fatalf("error = %v, want an issuer mismatch", err)
+	}
+	// RFC 9207: the check must happen before the code is redeemed, so a code
+	// issued by the wrong authorization server is never exchanged.
+	fake.mu.Lock()
+	exchanged := fake.exchanged
+	fake.mu.Unlock()
+	if exchanged {
+		t.Fatal("authorization code was exchanged despite the issuer mismatch")
 	}
 }
 

@@ -86,7 +86,7 @@ Bootstrap proves:
 - PKCE verifier/challenge generation is valid.
 - Authorization and consent preserve requested scopes.
 - Token exchange returns access and refresh tokens.
-- `initialize -> notifications/initialized -> tools/list` works over Streamable HTTP.
+- `server/discover -> tools/list` works over stateless Streamable HTTP, with no `Mcp-Session-Id` on any response.
 
 ## Required Closeout
 

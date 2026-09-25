@@ -1,35 +1,70 @@
 package testkit
 
 import (
-	"encoding/json"
-	"log/slog"
+	"context"
 	"net/http"
 	"net/http/httptest"
 	"testing"
+
+	"github.com/modelcontextprotocol/go-sdk/mcp"
 
 	"github.com/haakco/mcp-kit/audit"
 	"github.com/haakco/mcp-kit/mcpkit"
 )
 
+const (
+	// ServerName identifies the testkit MCP server.
+	ServerName = "mcp-kit-test"
+	// ServerVersion is the version the testkit MCP server reports.
+	ServerVersion = "0.0.0-test"
+	// HelloTool is the tool registered on every testkit server.
+	HelloTool = "hello_world"
+)
+
 // Server is an in-memory mcp-kit server for tests.
+//
+// It mirrors the kit's production guidance: MCP 2026-07-28 only, stateless
+// Streamable HTTP, explicit empty capabilities, and private caching. Tests that
+// need different transport behavior should build their own mcp.Server rather
+// than widen this fixture.
 type Server struct {
 	URL             string
 	MCPURL          string
 	HTTPServer      *httptest.Server
+	MCP             *mcp.Server
 	UserStore       *UserStore
 	RegisteredTools []string
 }
 
 // NewServer starts an in-memory mcp-kit server with test-token auth.
+//
+// Register additional tools on the returned Server.MCP before the first
+// request; the handler resolves the mcp.Server per request.
 func NewServer(t testing.TB) *Server {
 	t.Helper()
 	users := NewUserStore(t)
-	tools := []string{"hello_world"}
-	sessionID := randomID(t)
+	tools := []string{HelloTool}
+
+	mcpServer := mcp.NewServer(
+		&mcp.Implementation{Name: ServerName, Version: ServerVersion},
+		&mcp.ServerOptions{
+			Capabilities:              &mcp.ServerCapabilities{},
+			SupportedProtocolVersions: []string{mcpkit.ProtocolVersion},
+			SetCacheable:              mcpkit.PrivateCache(mcpkit.DefaultCacheTTL),
+		},
+	)
+	mcp.AddTool(mcpServer, &mcp.Tool{
+		Name:        HelloTool,
+		Description: "Return a greeting.",
+	}, helloWorld)
+
+	handler := mcp.NewStreamableHTTPHandler(
+		func(*http.Request) *mcp.Server { return mcpServer },
+		&mcp.StreamableHTTPOptions{Stateless: true, JSONResponse: true},
+	)
+
 	kit, err := mcpkit.New(mcpkit.Config{
-		Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			handleMCP(w, r, tools, sessionID)
-		}),
+		Handler: handler,
 		Bearer: mcpkit.BearerConfig{
 			TokenValidator: TokenValidator(t),
 		},
@@ -39,70 +74,24 @@ func NewServer(t testing.TB) *Server {
 	if err != nil {
 		t.Fatalf("create mcp-kit server: %v", err)
 	}
+
 	mux := http.NewServeMux()
 	mux.Handle("/mcp", kit.Handler())
 	httpServer := httptest.NewServer(mux)
 	t.Cleanup(httpServer.Close)
+
 	return &Server{
 		URL:             httpServer.URL,
 		MCPURL:          httpServer.URL + "/mcp",
 		HTTPServer:      httpServer,
+		MCP:             mcpServer,
 		UserStore:       users,
 		RegisteredTools: tools,
 	}
 }
 
-func handleMCP(w http.ResponseWriter, r *http.Request, tools []string, sessionID string) {
-	var request struct {
-		ID     any    `json:"id"`
-		Method string `json:"method"`
-	}
-	if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
-		http.Error(w, "malformed payload: invalid JSON", http.StatusBadRequest)
-		return
-	}
-	switch request.Method {
-	case "initialize":
-		w.Header().Set("Mcp-Session-Id", sessionID)
-		writeJSON(w, map[string]any{
-			"jsonrpc": "2.0",
-			"id":      request.ID,
-			"result": map[string]any{
-				"protocolVersion": "2025-03-26",
-				"capabilities":    map[string]any{"tools": map[string]any{}},
-				"serverInfo":      map[string]any{"name": "mcp-kit-test", "version": "0.0.0-test"},
-			},
-		})
-	case "notifications/initialized":
-		w.WriteHeader(http.StatusAccepted)
-	case "ping":
-		writeJSON(w, map[string]any{
-			"jsonrpc": "2.0",
-			"id":      request.ID,
-			"result":  map[string]any{},
-		})
-	case "tools/list":
-		items := make([]map[string]any, 0, len(tools))
-		for _, tool := range tools {
-			items = append(items, map[string]any{
-				"name":        tool,
-				"description": "Test tool.",
-				"inputSchema": map[string]any{"type": "object"},
-			})
-		}
-		writeJSON(w, map[string]any{
-			"jsonrpc": "2.0",
-			"id":      request.ID,
-			"result":  map[string]any{"tools": items},
-		})
-	default:
-		http.Error(w, "JSON RPC not handled: "+request.Method, http.StatusBadRequest)
-	}
-}
-
-func writeJSON(w http.ResponseWriter, value any) {
-	w.Header().Set("Content-Type", "application/json")
-	if err := json.NewEncoder(w).Encode(value); err != nil {
-		slog.Error("testkit: write JSON", "error", err)
-	}
+func helloWorld(context.Context, *mcp.CallToolRequest, any) (*mcp.CallToolResult, any, error) {
+	return &mcp.CallToolResult{
+		Content: []mcp.Content{&mcp.TextContent{Text: "hello world"}},
+	}, nil, nil
 }

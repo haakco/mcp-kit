@@ -9,23 +9,12 @@ import (
 	"github.com/haakco/mcp-kit/oauth"
 )
 
-// ErrNotImplemented is returned by symbols that are stubbed in v0.1.0.
-// They will be implemented in v0.2.0 (OAuth core extracted from skills-mcp).
-var ErrNotImplemented = errors.New("mcpkit: not implemented in v0.1.0")
-
 // Config configures a new MCP server.
 //
-// In v0.1.0 most fields are accepted but unused — New returns
-// ErrNotImplemented until the OAuth core lands. Use mcpmw.Envelope and
-// mcpmw.Origin standalone in the meantime.
+// Config covers the kit-owned middleware around the SDK handler. It does not
+// build or configure the SDK server itself: the consumer owns the
+// mcp.Server, its identity, its instructions, and its transport options.
 type Config struct {
-	// Implementation identifies the MCP server (Name + Version).
-	// Required when v0.2.0 lands.
-	Implementation any // mcp.Implementation in v0.2.0; any to keep v0.1.0 dep-free
-
-	// Instructions are the server-level guidance shown to clients on initialize.
-	Instructions string
-
 	// Handler is the SDK MCP HTTP handler before kit middleware.
 	Handler http.Handler
 

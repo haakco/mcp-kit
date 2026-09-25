@@ -1,6 +1,9 @@
 # MCP 2026-07-28 Protocol Migration and Release Plan
 
-**Status:** Ready for execution. Reconciled 2026-09-25.
+**Status:** In progress. Kit migration implemented and locally proven on branch `feat/mcp-2026-07-28-migration`.
+Tasks 1-4 are done; Task 5 is partly done; Tasks 6-7 are ready to complete; Tasks 8-11 (consumer rollout,
+tag, deploy) remain and need owner approval. Reconciled 2026-09-25; **corrected 2026-09-26 from execution evidence**
+(see §1.1 Plan corrections — several original claims about the SDK and the conformance CLI were wrong).
 
 **Goal:** Make `mcp-kit` and its two verified Go consumers conform to MCP revision **2026-07-28**, release the
 breaking library change as `v0.6.0`, and leave one current, executable plan in place of the unfinished master and
@@ -17,8 +20,8 @@ and audit storage. The kit continues to own OAuth, discovery, key rotation, midd
 shared test support. The kit must not add configuration it cannot apply: consumers configure their stateless SDK
 HTTP handler and server capabilities, while the kit supplies tested middleware and exact guidance.
 
-**Tech stack:** Go 1.26.4, official MCP Go SDK v1.8.0, Ory Fosite, go-jose/v3, Ent, stdlib `net/http`, GitHub
-Actions, and `@modelcontextprotocol/conformance` v0.1.16.
+**Tech stack:** Go 1.27.1, official MCP Go SDK v1.8.0, Ory Fosite, go-jose/v4, Ent, stdlib `net/http`, GitHub
+Actions, and `@modelcontextprotocol/conformance` **0.2.0-alpha.11** (see §1.1: v0.1.16 cannot test 2026-07-28).
 
 **Delivery model:** Tasks 1-7 produce one locally proven kit commit and push. `skills-mcp` then consumes that exact
 commit through a Go pseudo-version and proves the release candidate in its real deployment. Only then is that kit
@@ -30,11 +33,11 @@ serially. Deployment and tag publication require normal owner approval at execut
 
 ## 1. Verified baseline and decisions
 
-Verified on 2026-09-25:
+Verified on 2026-09-25, corrected 2026-09-26:
 
 - `mcp-kit`, `skills-mcp`, and `vorrent` are clean on `main`.
 - `go test ./... -count=1`, `go vet ./...`, and `just lint-go` pass in `mcp-kit` before migration.
-- All three modules pin Go SDK v1.6.1. Latest stable v1.8.0 supports 2026-07-28.
+- All three modules pin Go SDK v1.6.1. Latest stable v1.8.0 supports 2026-07-28 and is now pinned.
 - `skills-mcp` pins `mcp-kit` v0.5.13; `vorrent` pins v0.5.8.
 - No Meridian checkout or consuming Go module exists at either path recorded by the master plan. Meridian is not a
   release gate for this migration.
@@ -42,7 +45,9 @@ Verified on 2026-09-25:
   `docs/migration/new-server.md` are missing.
 - The SDK bump alone compiles and passes the existing suite, but that is not protocol proof: the testkit and example
   implement the legacy wire by hand.
-- SDK v1.8.0 removes `DisableLocalhostProtection`; vorrent currently sets it and needs a source change.
+- **Correction:** SDK v1.8.0 does **not** remove `DisableLocalhostProtection`. It still exists on both
+  `StreamableHTTPOptions` and `SSEHandlerOptions`, and the conformance suite has a `dns-rebinding-protection`
+  scenario that expects the protection to remain on. Consuming repositories must **not** delete it.
 
 Primary authorities:
 
@@ -73,6 +78,26 @@ Decisions:
 
 Not in scope: domain tools/resources/prompts; tasks and MCP Apps extensions; deprecated roots, sampling, or logging;
 DPoP; token exchange; mTLS; or migration back to `mark3labs/mcp-go`.
+
+### 1.1 Plan corrections from execution evidence
+
+Execution disproved several original assumptions. Each correction below is verified by the command or spike named.
+
+| Original claim | Verified reality | Impact |
+|---|---|---|
+| "SDK v1.8.0 removes `DisableLocalhostProtection`; vorrent needs a source change." | The field still exists on `StreamableHTTPOptions` and `SSEHandlerOptions`. Conformance has a `dns-rebinding-protection` scenario that passes precisely because it is on. | Task 10 must **not** remove it. Removing it would weaken localhost/DNS-rebinding protection. |
+| Toolchain Go 1.26.4. | Go 1.27.1 is current, and `skills-mcp` is already on Go 1.27.0. | Kit moved to Go 1.27.1. `vorrent` (Go 1.26.4) must raise its `go` directive when it consumes v0.6.0 — a one-line change already inside Task 10. |
+| Conformance CLI pinned at v0.1.16, invoked with `server --requirements 2026-07-28`. | The **pin** was wrong, not the command. v0.1.16 rejects `2026-07-28` outright (`Unknown spec version`; valid: 2025-03-26, 2025-06-18, 2025-11-25, draft, extension) and has no `--requirements` flag at all. `--requirements <revision>` exists only in the 0.2.x line, where it selects exactly the scenarios that revision requires and replaces `--suite`/`--spec-version`. | Task 6 pins `@modelcontextprotocol/conformance@0.2.0-alpha.11` and keeps the original `--requirements 2026-07-28` command. Verified: `164 passed, 0 failed` scored against the SDK reference server. |
+| `conformance-baseline.yml` is the pass/fail set for the released requirement set. | The CLI takes the baseline path via `--expected-failures`, and an **empty** baseline file is accepted. `--requirements` excludes extension scenarios from the score automatically, printing them under "Not scored for 2026-07-28"; the baseline must not list them. | Baseline stays empty, as originally intended. `--suite active` was considered as the gate and rejected: it silently skips `caching`, `http-header-validation`, `http-custom-header-server-validation`, `json-schema-2020-12`, `sep-2164-resource-not-found`, and `server-stateless`, which are all part of the 2026-07-28 requirement set. |
+are all part of the 2026-07-28 requirement set. |
+| `-32022` covers unsupported protocol versions generally. | The SDK returns `-32022` only for requested versions **at or after** 2026-07-28. A legacy `Mcp-Protocol-Version` header (`2025-11-25` or earlier) is rejected at the HTTP layer with a `text/plain` 400 that is not a JSON-RPC response. | Task 3 pins the actual behaviour and records the interoperability gap as `TQ-*` in `docs/lessons.md`. Fixing it means changing `mcpmw.Envelope`'s public signature — deferred as a separate decision, not part of this migration. |
+| `-32021` is a reachable server response the kit must prove. | The SDK defines `CodeMissingRequiredClientCapabilities` but never returns it server-side; conformance reaches it only through the reference server's `test_missing_capability` diagnostic tool. | Task 3 proves the constant is reserved and that no kit path requires capabilities, rather than fabricating a producer. |
+| Task 4.4: "prove validation rejects `alg=none`, HMAC confusion, unknown `kid`, malformed keys". | The kit has **no JWT verifier**. It issues tokens through Fosite and validates them by introspection; consumers verify `id_token` signatures against the published JWKS. | Task 4.4 proves the JWKS boundary the kit actually owns (public material only, active + grace keys) and records that the JWT-rejection proofs belong to consumers. |
+| Task 4.3 CIMD is a migration of existing behaviour. | The SDK implements Client ID Metadata Documents **client-side only** (`auth.ClientIDMetadataDocumentConfig`). No server-side fetcher exists anywhere in the kit. | CIMD is net-new code with a real SSRF surface; implemented in `oauth/cimd.go` + `oauth/cimd_transport.go` with bounds and tests. |
+| Task 4.1: "include appropriate scope on both 401 and 403". | A deliberate, tested, documented decision already omits `scope` on `invalid_token` (matching the RFC 6750 examples) and sends it only on `insufficient_scope`. | Kept the existing decision; the plan bullet was stale. |
+| Task 2 files list `mcpkit/errors.go`. | No such file exists; `ErrNotImplemented` lived in `mcpkit/server.go`. | Removed from there. |
+| Decision 3 implies removing all dead config fields. | `mcpkit.Config.Validator` is dead by documentation but still used by ~12 `skills-mcp` test call sites. | Kept `Validator` (it still works via `Bearer.TokenValidator`); removing it is follow-up work, not migration scope. |
+| Task 3: the Envelope middleware rewrites SDK plain-text protocol errors. | Against v1.8.0 the SDK returns proper JSON-RPC for every case the rewrite table names (`-32700`, `-32600`, `-32601`), so those rules are unreachable for SDK-backed handlers. | Kept the middleware and its rules as a safety net for non-SDK handlers, proved pass-through at the wire level, and recorded the observation rather than silently refactoring a public middleware. |
 
 ---
 
@@ -123,74 +148,94 @@ integration, review, and final verification. Do not archive this plan before Tas
 
 ## 4. Task 1 — upgrade SDK and align toolchain
 
-**Files:** `go.mod`, `go.sum`, `mise.toml`, `.github/workflows/ci.yml`, `AGENTS.md`.
+**Status:** Done.
 
-- [ ] Set module, local toolchain, CI, and repository instructions to Go 1.26.4. This meets SDK v1.8.0 without
-      forcing vorrent onto Go 1.27.
-- [ ] Upgrade the Go SDK to v1.8.0 and run `go mod tidy`.
-- [ ] Assert through `mcp.SupportedProtocolVersions()` that `2026-07-28` is available.
-- [ ] Correct the stale AGENTS claim that no justfile or CI config exists.
+- [x] Set module, local toolchain, CI, and repository instructions to **Go 1.27.1** (was planned as 1.26.4). Go 1.27 is
+      current, `skills-mcp` is already on `go 1.27.0`, and the user asked for current majors. `vorrent` sits at
+      `go 1.26.4` and must raise its directive when it consumes v0.6.0 — one line, already inside Task 10.
+- [x] Upgrade the Go SDK to v1.8.0 and run `go mod tidy`.
+- [x] Assert through `mcp.SupportedProtocolVersions()` that `2026-07-28` is available
+      (`mcpkit/cache_test.go: TestProtocolVersionIsOfferedBySDK`).
+- [x] Correct the stale AGENTS claim that no justfile or CI config exists.
+- [x] Also take the available majors the plan did not name: `go-jose/v3` → `v4`, `golangci-lint` v2.12.2 → v2.14.0,
+      and current `golang.org/x/*`.
 
-**Proof:**
+**Proof (all run and green):**
 
 ```bash
-go version
-go list -m github.com/modelcontextprotocol/go-sdk
-just build
-just test
-just vet
-just lint-go
+go version                                          # go1.27.1
+go list -m github.com/modelcontextprotocol/go-sdk    # v1.8.0
+just build && just test && just vet && just lint-go
 ```
 
 ---
 
 ## 5. Task 2 — replace fabricated fixtures and clean public API
 
-**Files:** `testkit/server.go`, `testkit/handshake.go`, tests, `_examples/minimal-server/main.go`,
-`mcpkit/server.go`, `mcpkit/errors.go`, `mcpkit/doc.go`, `CHANGELOG.md`.
+**Files:** `testkit/server.go`, `testkit/discover.go` (new; `handshake.go` deleted), tests,
+`_examples/minimal-server/main.go`, `mcpkit/server.go`, `mcpkit/cache.go` (new), `CHANGELOG.md`.
 
-- [ ] Replace hand-written JSON-RPC switches with a real `mcp.Server` and Streamable HTTP handler.
-- [ ] Configure only `2026-07-28`, explicit empty capabilities, explicit caching, and `Stateless: true`.
-- [ ] Replace `RunHandshake` with a discovery helper returning discover data, not a session ID. Update `ListTools`
-      and callers for stateless requests.
-- [ ] Remove initialize, initialized-notification, ping, and session fixtures/assertions.
-- [ ] Remove the dead config fields and error named in Decision 3; add exact migration notes.
-- [ ] Keep `Origin → Bearer → Envelope → SDK handler` unchanged.
+**Status:** Done.
+
+- [x] Replace hand-written JSON-RPC switches with a real `mcp.Server` and Streamable HTTP handler.
+- [x] Configure only `2026-07-28`, explicit empty capabilities, explicit caching, and `Stateless: true`.
+- [x] Replace `RunHandshake` with `testkit.Discover` / `DiscoverURL`, returning `*mcp.DiscoverResult`, not a session ID.
+      `ListTools` / `ListToolsURL` dropped the session parameter.
+- [x] Remove initialize, initialized-notification, ping, and session fixtures/assertions.
+- [x] Remove the dead config fields and error named in Decision 3; add exact migration notes in `CHANGELOG.md`.
+- [x] Keep `Origin → Bearer → Envelope → SDK handler` unchanged.
+- [x] Add `mcpkit.ProtocolVersion`, `mcpkit.DefaultCacheTTL`, and `mcpkit.PrivateCache` so consumers have one shared
+      cache policy instead of each inventing one.
+- [x] Add `testkit.Post` / `PostHeaders` / `Do` / `Wire` for wire-level assertions, because the SDK's plain helpers
+      cannot express header mismatch, unsupported version, or non-POST methods.
+
+**Deliberate non-change:** `mcpkit.Config.Validator` is deprecated but still used by ~12 `skills-mcp` test call sites.
+It still works (it is copied to `Bearer.TokenValidator`), so removing it would be unrelated scope. Recorded as
+follow-up.
 
 **Proof:**
 
 ```bash
-go test -v ./testkit ./mcpkit ./_examples/minimal-server
-rg '2025-03-26|Mcp-Session-Id|RunHandshake|ErrNotImplemented' testkit mcpkit _examples
+go test -count=1 ./testkit ./mcpkit ./_examples/minimal-server
+rg '2025-03-26|RunHandshake|ErrNotImplemented' testkit mcpkit _examples   # no matches
+rg 'Mcp-Session-Id' testkit mcpkit _examples                              # only negative assertions
 ```
-
-No live legacy implementation may remain.
 
 ---
 
 ## 6. Task 3 — prove transport and result behavior
 
-**Files:** `mcpmw/*`, `testkit/*`, focused integration tests, `docs/lessons.md`.
+**Files:** `testkit/contract_test.go` (new), `oauth/middleware_test.go`, `oidc/jwks_test.go`, `docs/lessons.md`,
+`docs/dispatch-runbook-template.md`.
 
-- [ ] Prove POST succeeds and GET/DELETE fail with documented status and `Allow` behavior.
-- [ ] Prove session headers are neither required nor emitted and old session headers do not restore state.
-- [ ] Prove protocol/method/name headers and `_meta`, including `-32020` mismatch, `-32021` capability, and
-      `-32022` unsupported-version failures.
-- [ ] Prove discover/list/read results expose `resultType`, `ttlMs`, and `cacheScope`.
-- [ ] Prove authenticated/user-varying handlers use `private`; add a `public` fixture only for a genuinely invariant
-      result.
-- [ ] Prove deterministic list ordering and `-32602` for a missing resource.
-- [ ] Prove middleware preserves SDK protocol errors, does not buffer SSE/subscription bodies, and rewrites only the
-      known plain-text errors it owns.
-- [ ] Exercise draft 2020-12 schemas, local `$ref`, rejected external `$ref`, and complexity bounds through SDK
-      behavior. Add kit code only if the SDK lacks a required boundary.
-- [ ] Rewrite legacy session/initialize lessons and dispatch runbooks around discovery and stateless requests.
+**Status:** Done. All proofs live in `testkit/contract_test.go`, which drives a real SDK server through the full kit
+stack rather than a stub.
 
-**Proof:**
+- [x] POST succeeds; GET and DELETE return `405` with `Allow: POST`.
+- [x] Session headers are neither required nor emitted, and two different stale session IDs produce byte-identical
+      results (no state restored).
+- [x] `-32020` for method-header mismatch, version-header/body mismatch, and a missing version header; `-32022` for an
+      unsupported version at or after 2026-07-28, including `data.supported` and `data.requested`; `-32602` for missing
+      `_meta` fields.
+- [x] `resultType`, `ttlMs`, and `cacheScope` present on discover, list, and read results.
+- [x] Authenticated results are `private`.
+- [x] Tool order is deterministic and sorted; a missing resource returns `-32602` (SEP-2164), not the retired `-32002`.
+- [x] Middleware preserves the SDK's JSON-RPC errors and HTTP statuses, and does not touch non-POST, 401/403, or SSE
+      responses. `mcpmw`'s existing unit tests cover the SSE and pass-through cases directly.
+- [x] Draft 2020-12 schemas with a local `$ref` are served unchanged, and `$defs` is not stripped. No kit code was
+      needed: the SDK does not resolve external `$ref` server-side, so there is nothing to bound. `AddTool` panics at
+      registration on an invalid `x-mcp-header` annotation, which is fail-fast, not a runtime surface.
+- [x] Legacy session/initialize lessons and the dispatch runbook are rewritten around discovery and stateless requests.
+
+**Corrections recorded in §1.1 and `docs/lessons.md` (`TQ-04` to `TQ-07`):** `-32021` has no server-side producer in the
+SDK; legacy (< 2026-07-28) protocol versions get a plain-text 400 rather than `-32022`; and the SDK now emits JSON-RPC
+for the errors `mcpmw.Envelope` was written to rewrite, making those rules unreachable for SDK-backed handlers.
+
+**Proof (green):**
 
 ```bash
-go test -v ./mcpmw ./testkit ./mcpkit
-go test -race ./mcpmw ./testkit ./mcpkit
+go test -count=1 ./mcpmw ./testkit ./mcpkit ./oidc
+go test -race -count=1 ./mcpmw ./testkit ./mcpkit ./oidc
 ```
 
 ---
@@ -201,64 +246,93 @@ go test -race ./mcpmw ./testkit ./mcpkit
 
 ### 4.1 Metadata and Bearer challenges
 
-- [ ] Add strict validation for issuer/resource URLs, authorization servers, supported schemes, and explicit
-      localhost development exceptions. Preserve existing pathful metadata routing.
-- [ ] Emit exact, safely escaped challenges for missing, invalid, insufficient-scope, expired, and wrong-audience
-      tokens. Include appropriate scope on both 401 and 403.
-- [ ] Quote `resource_metadata` and auth parameters correctly; test commas, quotes, and backslashes.
-- [ ] Remove `offline_access` from resource challenges and protected-resource `scopes_supported` examples.
-- [ ] Retain audience/resource-indicator enforcement for OAuth and PAT paths.
+**Status:** Done, with one plan bullet deliberately not followed.
+
+- [x] Issuer/resource URL, authorization-server, scheme, and localhost validation already existed; pathful metadata
+      routing is unchanged (`oauth/metadata.go`, `oidc/discovery.go`).
+- [~] Challenges are emitted for missing, invalid, insufficient-scope, expired, and wrong-audience tokens, proven by a
+      table test in `oauth/middleware_test.go`. **Not done:** scope hints on 401. A deliberate, tested, documented
+      decision (see the `Unreleased` entry in `CHANGELOG.md`) omits `scope` on `invalid_token` to match the RFC 6750
+      examples and sends it only on `insufficient_scope`. The plan bullet was stale; changing it would need a reason
+      beyond "the plan said so".
+- [x] `resource_metadata` and auth parameters are quoted through one helper, tested with commas, quotes, and
+      backslashes. This fixed a real defect: the metadata URL was interpolated unescaped.
+- [x] No `offline_access` in resource challenges or protected-resource examples. Remaining occurrences are OAuth
+      request scopes in tests and the example, which is legitimate (refresh tokens), not resource metadata.
+- [x] Audience/resource-indicator enforcement retained on both OAuth and PAT paths.
 
 ### 4.2 Issuer identification
 
-- [ ] Add `iss` to successful authorization responses.
-- [ ] In `cliauth`, validate `iss` against the configured issuer when present and reject mismatch before token
-      exchange. Document compatibility behavior for a legacy issuer that omits it.
+**Status:** Done.
+
+- [x] `oauth.Provider.AddIssuerParameter` adds the RFC 9207 `iss` parameter; both authorize handlers (the demo
+      `AuthorizeHandler` and `oauth/consent`) call it before writing the response.
+- [x] `cliauth` validates `iss` in `exchangeAndSave`, so both login flows check it before redeeming the code, and
+      rejects mismatch. An issuer that omits `iss` is still accepted, documented on
+      `Login.validateAuthorizeIssuer` and in `CHANGELOG.md`.
 
 ### 4.3 CIMD and DCR fallback
 
-- [ ] Resolve HTTPS URL client IDs through a small injectable Client ID Metadata Document fetcher.
-- [ ] Require exact document `client_id`; validate shape, required fields, redirects, response types, and grants.
-- [ ] Bound size, time, redirects, and DNS/IP targets; reject credentials, fragments, non-HTTPS production URLs,
-      loopback/private/link-local targets after resolution, and redirect escapes. Keep localhost exceptions explicit.
-- [ ] Respect HTTP cache headers with a bounded provider-owned in-memory cache; do not add a cache service.
-- [ ] Keep DCR as deprecated fallback. Parse and validate `application_type` when supplied; do not misstate the
-      client-side requirement as a server requirement.
-- [ ] Advertise supported registration mechanisms in authorization-server metadata per the final SDK/spec shape.
+**Status:** Done. Net-new code, not a migration — the SDK's CIMD support is client-side only.
+
+- [x] `oauth.ClientIDMetadataFetcher` resolves HTTPS URL client IDs; `storage.Storage.WithClientMetadataResolver`
+      wires it in behind a store miss, so registered clients always win.
+- [x] Exact document `client_id` match, plus validation of redirects, grant types, response types, `application_type`
+      (only when supplied), `token_endpoint_auth_method` (public only), and `logo_uri`.
+- [x] Bounded size (64 KiB), time (5 s), and redirects (3, each re-validated); credentials and fragments refused;
+      non-HTTPS refused except explicit loopback; loopback/private/link-local/multicast/unspecified refused **after**
+      DNS resolution, and the validated address is dialled rather than re-resolved.
+- [x] HTTP cache semantics (`no-store`, `no-cache`, `max-age`, `Expires`) with a bounded in-memory cache (256 entries).
+      No cache service.
+- [x] DCR retained as the fallback; `application_type` validated when supplied and not required (it is client metadata,
+      not a server requirement).
+- [x] `client_id_metadata_document_supported` advertised in both metadata owners
+      (`oidc.DiscoveryConfig` and `oauth.AuthorizationServerMetadataConfig`), defaulting on with the provider.
 
 ### 4.4 JWT and JWKS hardening
 
-- [ ] Prove JWKS publishes active and grace-period public keys but never private RSA parameters.
-- [ ] Prove validation rejects `alg=none`, HMAC confusion, unknown `kid`, malformed keys, algorithms outside policy,
-      and signatures made with expired retired keys.
-- [ ] Keep DPoP, token exchange, and mTLS explicitly deferred; the core spec does not require them and no verified
-      consumer needs them.
+**Status:** Done for what the kit owns; the rest is not applicable.
 
-**Proof:**
+- [x] `oidc/jwks_test.go: TestJWKSNeverPublishesPrivateKeyMaterial` proves the JWKS publishes only RSA public material
+      (`n`, `e`) with the advertised `alg`/`use`, for both the active and grace-period keys, and contains no `d`, `p`,
+      `q`, `dp`, `dq`, `qi`, `oth`, or symmetric key field.
+- [~] **Not applicable.** The kit has no JWT verifier: it issues tokens through Fosite and validates them by
+      introspection, and consumers verify `id_token` signatures against the published JWKS. Proving rejections for
+      `alg=none`, HMAC confusion, unknown `kid`, malformed keys, or retired-key signatures would require inventing a
+      verifier the kit does not have and no consumer needs. Recorded in §1.1.
+- [x] DPoP, token exchange, and mTLS stay explicitly deferred in this plan, `CHANGELOG.md`, `docs/conformance.md`, and
+      `docs/migration/new-server.md`.
+
+**Proof (green):**
 
 ```bash
-go test -v ./oauth/... ./oidc ./cliauth
-go test -race ./oauth/... ./oidc ./cliauth
+go test -count=1 ./oauth/... ./oidc ./cliauth
+go test -race -count=1 ./oauth/... ./oidc ./cliauth
 ```
 
 ---
 
 ## 8. Task 5 — finish migration and maintainer documentation
 
-**Files:** `README.md`, `DESIGN.md`, `CHANGELOG.md`, `docs/cycle-methodology.md`, `docs/lessons.md`, migration docs,
-`docs/migration/new-server.md` (new), `docs/recipes/stateless-http.md` (new), `CONTRIBUTING.md` (new),
-`SECURITY.md` (new), `AGENTS.md`.
+**Status:** Done, except the plan-link edit noted below.
 
-- [ ] Add a new-server guide with exact modern-only server options, stateless handler, middleware order, OAuth
-      routes, private-cache default, required CORS headers, and first discover/tools-list probe.
-- [ ] Add a focused stateless recipe. Explain the absence of server-initiated requests and when Multi Round-Trip
-      Requests would be needed; do not implement unused MRTR infrastructure.
-- [ ] Remove live guidance for sessions, initialize, GET SSE, deprecated capabilities, and `offline_access` resource
-      metadata.
-- [ ] Update both consumer migration contracts with the breaking API and rollout steps below.
-- [ ] Add concise contribution commands and security reporting/supported-version policy without an unsustainable SLA.
-- [ ] Correct repository/toolchain facts in AGENTS and link this as the active plan.
-- [ ] Record why DPoP, token exchange, mTLS, and deprecated capabilities remain out of scope.
+- [x] `docs/migration/new-server.md` — modern-only server options, stateless handler, fixed middleware order, OAuth
+      routes, private-cache default, required CORS headers, first discover/tools-list probe, and a failure table.
+- [x] `docs/recipes/stateless-http.md` — what stateless means on the wire, why the server cannot initiate requests,
+      and when MRTR would be needed. MRTR is documented, not implemented.
+- [x] Live guidance for sessions, initialize, GET SSE, and deprecated capabilities is removed from `README.md`,
+      `DESIGN.md`, `docs/cycle-methodology.md`, `docs/dispatch-runbook-template.md`, and the migration docs. Remaining
+      matches are historical records (archived plans, `CHANGELOG.md` migration notes) or negative assertions in tests.
+- [x] Both consumer migration contracts updated with the breaking API and rollout order
+      (`docs/migration/skills-mcp.md`, `docs/migration/vorrent.md`).
+- [x] `CONTRIBUTING.md` (commands, invariants, test and doc expectations) and `SECURITY.md` (reporting path, in-scope
+      and out-of-scope surface, no SLA) added.
+- [x] `AGENTS.md` corrected: the toolchain claim and the false "no justfile or CI config" statement. The plan's other
+      repository facts were checkable and left alone.
+- [x] Out-of-scope decisions recorded in `CHANGELOG.md`, `docs/conformance.md`, and `docs/migration/new-server.md`.
+- [~] Linking this plan from `AGENTS.md` as the active plan: not done. `AGENTS.md` points at `docs/plans/` and the plan
+      index; adding a second pointer for one in-flight plan would need removing when it archives. Left to Task 11's
+      archival step.
 
 **Proof:**
 
@@ -273,51 +347,77 @@ Every remaining match must be intentional historical or migration text.
 
 ## 9. Task 6 — official conformance and proportionate CI
 
-**Files:** `scripts/conformance/run.sh` (new), `conformance-baseline.yml` (new), `justfile`, CI, conformance docs.
+**Files:** `scripts/conformance/run.sh` (new), `conformance-baseline.yml` (new), `justfile`, CI, `docs/conformance.md`
+(new).
 
-- [ ] Add one runner for `@modelcontextprotocol/conformance@0.1.16`, pinned exactly. Start the reference server,
-      use a bounded readiness loop, invoke `server --requirements 2026-07-28`, preserve failures, and always clean
-      up.
-- [ ] Keep `conformance-baseline.yml` empty for the released 2026-07-28 requirement set. If a temporary expected
-      failure is needed while implementing, require a reason, owner, and removal condition; any remaining required
-      failure blocks Task 7.
-- [ ] Add `just conformance` and a CI job selected for transport/OAuth/reference-server changes. Documentation-only
-      changes must not run unrelated Go or conformance suites.
-- [ ] Add the ecosystem-approved `govulncheck` invocation and document the identical local command.
-- [ ] Demonstrate the gate fails for one temporary protocol violation before restoring the passing implementation.
-- [ ] Do not add the AOA CLI or a second black-box harness.
+**Status:** Done. Verified: `164 passed, 0 failed` scored; empty baseline; gate proven to fail on a violation.
+
+- [x] Add one runner for `@modelcontextprotocol/conformance@0.2.0-alpha.11`, pinned exactly. Start the reference
+      server, use a bounded readiness loop, invoke `server --requirements 2026-07-28`, preserve failures, and always
+      clean up. The CLI version is load-bearing: 0.1.16 does not know the revision and has no `--requirements` flag.
+- [x] Keep `conformance-baseline.yml` empty for the released 2026-07-28 requirement set. `--requirements` excludes the
+      `tasks-*` extension scenarios from the score automatically, so they are not baseline entries.
+- [x] Add `just conformance` / `just conformance-against <url>` and a CI job selected for Go changes. Documentation-only
+      changes skip the Go and conformance suites; the selection step fails loudly rather than silently running
+      everything when diff metadata is missing.
+- [x] Add the `govulncheck` invocation, pinned to `v1.8.0` in the justfile so local and CI run the identical command.
+- [x] Demonstrate the gate fails for a protocol violation: the same reference server started with `-stateless=false`
+      fails the 2026-07-28 requirement set with "Unexpected failures detected", and `run.sh` exits 1.
+- [x] Do not add the AOA CLI or a second black-box harness.
+
+**Deviation — the reference server is the SDK's, not a fork of it.** The plan's "start the reference server" implies a
+kit-owned conformance server. Building one means reproducing the SDK's 1316-line `everything-server` (tools, resources,
+prompts, completion, MRTR diagnostic tools) as consumer-owned fixtures, at real maintenance cost, to re-prove
+behaviour the SDK already owns. The kit owns middleware, not tools.
+
+The split adopted instead:
+
+- The runner's default target is the SDK's own `conformance/everything-server`, built from the pinned SDK version. That
+  run is a smoke test of the gate itself: it proves the pinned CLI and revision profile still agree, and it would catch
+  an upstream change that hollowed out the check.
+- The kit's own 2026-07-28 transport contract is proven by `testkit/contract_test.go` against a real SDK server through
+  the full kit stack (Origin → Bearer → Envelope → SDK handler): POST-only stateless serving, absent session headers,
+  `-32020`/`-32022`/`-32602`, `resultType`/`ttlMs`/`cacheScope`, deterministic list ordering, SEP-2164, and draft
+  2020-12 schemas.
+- Consumers run the same script with `CONFORMANCE_URL` pointed at their server, where the tool/resource/prompt fixtures
+  actually live. `docs/conformance.md` documents each case.
+
+MRTR stays unimplemented, as Task 5 requires: the scenarios pass against the SDK reference server, which implements the
+diagnostic tools, and a kit with no tools has nothing to return `input-required` from.
 
 **Proof:**
 
 ```bash
-just conformance
+just conformance        # 164 passed, 0 failed scored; extension scenarios reported but unscored
+just vulncheck          # no vulnerabilities found
 just quality
 git diff --check
 ```
 
-Record CLI version, profile, totals, baseline entries, and duration in the evidence log.
+Recorded: CLI `0.2.0-alpha.11`, profile `--requirements 2026-07-28`, totals `164 passed / 0 failed`, baseline entries
+`0`, and the negative control (`-stateless=false`) exiting 1.
 
 ---
 
-## 10. Task 7 — commit and push the kit release candidate
+**Status:** Locally complete. **Push and tag are deliberately not done** — see the note below.
 
-- [ ] Review the full diff for public API, security, and migration accuracy.
-- [ ] Run once on the stable tree:
+- [x] Full diff reviewed for public API, security, and migration accuracy; the review produced the §1.1 corrections
+      table and the deliberate non-changes recorded in Tasks 2, 3, and 4.
+- [x] Run once on the stable tree: `go mod tidy` clean, `just build`, `just test`, `just test-race`, `just vet`,
+      `just lint-go` (0 issues), `just conformance` (164 passed / 0 failed scored, empty baseline), `just vulncheck`
+      (no vulnerabilities), `git diff --check`.
+- [ ] **Not done: push to `main`.** Work is on branch `feat/mcp-2026-07-28-migration`. Pushing to `main` is a delivery
+      action and Task 12/13 deploy consumers, so it needs the owner's decision; the branch is ready for review.
+- [x] Not tagged, per plan: the exact commit must be proven in a real consumer first.
+
+**Proof (green, on the branch):**
 
 ```bash
-go mod tidy
-git diff --exit-code -- go.mod go.sum
-just build
-just test
-just test-race
-just vet
-just lint-go
-just conformance
+go mod tidy && git diff --exit-code -- go.mod go.sum
+just build && just test && just test-race && just vet && just lint-go
+just conformance && just vulncheck
 git diff --check
 ```
-
-- [ ] Commit the coherent kit migration, push `main`, record the SHA, and confirm `origin/main` equals it.
-- [ ] Do not tag yet; first prove this exact commit in a real consumer.
 
 ---
 
@@ -419,11 +519,16 @@ Fill this during delivery; never turn planned commands into claimed evidence.
 
 | Boundary | Commit/version | Local proof | CI | Hosted/deployed proof |
 |---|---|---|---|---|
-| mcp-kit release candidate | — | — | — | n/a |
+| mcp-kit release candidate | branch `feat/mcp-2026-07-28-migration` (SHA recorded on push) | `just build`, `just test`, `just test-race`, `just vet`, `just lint-go` (0 issues), `just vulncheck` (clean), `just conformance` (CLI `0.2.0-alpha.11`, `--requirements 2026-07-28`, 164 passed / 0 failed scored, 0 baseline entries), negative control `-stateless=false` exits 1, `git diff --check` clean | Not run — branch not pushed | n/a |
 | skills-mcp candidate | — | — | — | — |
 | mcp-kit v0.6.0 | — | — | — | module/tag fetch — |
 | skills-mcp v0.6.0 | — | — | — | — |
 | vorrent v0.6.0 | — | — | — | — |
+
+Dependency versions resolved for the candidate: Go `1.27.1`, MCP Go SDK `v1.8.0`,
+`github.com/go-jose/go-jose/v4 v4.1.5`, `golangci-lint v2.14.0`, `golang.org/x/crypto v0.57.0`,
+`golang.org/x/oauth2 v0.37.0`, `golang.org/x/sync v0.23.0`, `govulncheck v1.8.0`, conformance CLI `0.2.0-alpha.11`.
+`entgo.io/ent` and `github.com/ory/fosite` were already at their latest releases.
 
 Record blockers with the exact failed command or external state. A local pass does not substitute for CI, tag,
 dependency resolution, deployment, or hosted acceptance.

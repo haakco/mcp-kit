@@ -36,6 +36,20 @@ var (
 // ErrNotFound indicates the requested client or session row does not exist.
 var ErrNotFound = errors.New("oauth storage: not found")
 
+// ErrNotAClientMetadataURL tells Storage that a client metadata resolver does
+// not handle the requested client ID, so the usual unknown-client error stands.
+var ErrNotAClientMetadataURL = errors.New("oauth storage: not a client metadata URL")
+
+// ClientMetadataResolver resolves a client that the consumer's store does not
+// hold. The kit uses it for Client ID Metadata Documents, where a client_id is
+// an HTTPS URL rather than a registered identifier.
+//
+// ResolveClient must return ErrNotAClientMetadataURL when the ID is not one it
+// handles; any other error means the ID was handled but could not be resolved.
+type ClientMetadataResolver interface {
+	ResolveClient(ctx context.Context, clientID string) (Client, error)
+}
+
 // Client is the persisted OAuth client shape required by Fosite.
 type Client struct {
 	ID               string
@@ -85,7 +99,8 @@ type TransactionalStore interface {
 
 // Storage implements Fosite storage interfaces.
 type Storage struct {
-	store Store
+	store                  Store
+	clientMetadataResolver ClientMetadataResolver
 }
 
 // New creates a Fosite storage adapter.
@@ -93,16 +108,41 @@ func New(store Store) *Storage {
 	return &Storage{store: store}
 }
 
+// WithClientMetadataResolver returns a copy of Storage that resolves clients
+// missing from the consumer's store through resolver. Use it to support Client
+// ID Metadata Documents; the resolver is only consulted after a store miss, so
+// registered clients always win.
+func (s *Storage) WithClientMetadataResolver(resolver ClientMetadataResolver) *Storage {
+	cloned := *s
+	cloned.clientMetadataResolver = resolver
+	return &cloned
+}
+
 // GetClient loads an OAuth client by client_id.
 func (s *Storage) GetClient(ctx context.Context, id string) (fosite.Client, error) {
 	client, err := s.store.GetClient(ctx, id)
-	if err != nil {
-		if errors.Is(err, ErrNotFound) {
-			return nil, fosite.ErrNotFound
-		}
+	if err == nil {
+		return clientWrapper{client: client}, nil
+	}
+	if !errors.Is(err, ErrNotFound) {
 		return nil, fmt.Errorf("query client: %w", err)
 	}
-	return clientWrapper{client: client}, nil
+	if s.clientMetadataResolver == nil {
+		return nil, fosite.ErrNotFound
+	}
+
+	resolved, resolveErr := s.clientMetadataResolver.ResolveClient(ctx, id)
+	switch {
+	case resolveErr == nil:
+		return clientWrapper{client: resolved}, nil
+	case errors.Is(resolveErr, ErrNotAClientMetadataURL):
+		return nil, fosite.ErrNotFound
+	default:
+		// The ID was a metadata URL but could not be resolved. Report an invalid
+		// client rather than a server error, and keep the cause out of the
+		// response body.
+		return nil, fosite.ErrInvalidClient.WithHint("client ID metadata document could not be resolved")
+	}
 }
 
 // ClientAssertionJWTValid fails closed because JWT client authentication is
