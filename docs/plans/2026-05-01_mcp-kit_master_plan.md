@@ -1,6 +1,10 @@
 # mcp-kit Master Implementation Plan
 
-**Status:** Phases 1-8 and 10 complete; phases 9, 11, and 12 still open. Created 2026-05-01. v0.1.0 spike landed in commit `5aedbba`.
+**Status:** Superseded 2026-09-25. Phases 1-8 and 10 remain historical completed work; all still-applicable work
+from phases 9, 11, and 12 is reconciled into
+[`2026-09-25_mcp-2026-07-28-protocol-migration.md`](2026-09-25_mcp-2026-07-28-protocol-migration.md). Do not execute
+unchecked items from this file: the current protocol, consumer inventory, release version, and conformance owner have
+changed. Created 2026-05-01. v0.1.0 spike landed in commit `5aedbba`.
 **Goal:** Take `mcp-kit` from v0.1.0 skeleton to v1.0.0 stable, with three Go consumers (skills-mcp, vorrent, meridian) all building and shipping against it; capture the universal MCP-server methodology in shared HaakCo skills so non-Go servers (Laravel) reuse the patterns.
 
 **Background:** HaakCo today has three Go services that need or already run MCP servers (`vorrent`, `skills-mcp`, `meridian`). Each shipped or planned its own ~3000 lines of OAuth + middleware + discovery + key rotation, with two of the three diverging in security posture (vorrent has no key rotation; skills-mcp has no JSON-RPC envelope rewriter). Without a shared library, each new server in any future Go project repeats the work and the implementations drift further. This plan extracts the cross-cutting concerns into a reusable library at `github.com/haakco/mcp-kit`, migrates the three servers, and shipss v1.0.0 with a battle-tested API surface.

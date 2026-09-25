@@ -95,7 +95,7 @@ PAT and OAuth bearer paths share the same context shape; `GetAuthSource(ctx)` di
 - **The cycle methodology is the QA loop.** `docs/cycle-methodology.md` describes the phased E2E protocol consumers run against their kit-backed servers. Kit changes that affect transport, auth, or discovery should be re-verified with the bootstrap probe (`PR-02` in `docs/lessons.md`) on at least one downstream consumer before tagging a release.
 - **`mcpkit.ErrNotImplemented` is a real return value.** Some symbols (notably parts of `mcpkit.Config`) are intentionally stubbed for future versions. Don't paper over them — implement properly or leave them as `ErrNotImplemented` and call them out in `CHANGELOG.md`.
 - **Method-per-receiver cap (~12).** `CG-02` in `docs/lessons.md` describes the rationale: when a 13th method wants to land on `*Server` or `*Provider`, prefer a separate handler/embedder type over padding the receiver. Apply the cap in code review, not via lint config (none exists yet).
-- **Plans live in `docs/plans/`.** The active plan is `docs/plans/2026-05-01_mcp-kit_master_plan.md`. New plans follow the template in `docs/plans/README.md` and are dated `YYYY-MM-DD_<topic>.md`.
+- **Plans live in `docs/plans/`.** The active plan is `docs/plans/2026-09-25_mcp-2026-07-28-protocol-migration.md`. New plans follow the template in `docs/plans/README.md` and are dated `YYYY-MM-DD_<topic>.md`.
 
 ## What not to do
 

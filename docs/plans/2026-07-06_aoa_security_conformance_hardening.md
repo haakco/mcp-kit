@@ -2,7 +2,10 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Status:** Draft. Created 2026-07-06.
+**Status:** Superseded 2026-09-25. The applicable metadata, challenge, JWT, JWKS, and deferral work is reconciled into
+[`2026-09-25_mcp-2026-07-28-protocol-migration.md`](2026-09-25_mcp-2026-07-28-protocol-migration.md). The proposed
+AOA conformance runner is superseded by the official MCP conformance CLI. Do not execute unchecked items here.
+Created 2026-07-06.
 
 **Goal:** Borrow the useful security and conformance patterns from `github.com/0ndreu/aoa` and `github.com/0ndreu/aoa-conformance` without turning `mcp-kit` into an `aoa` wrapper or violating the kit/consumer boundary.
 
