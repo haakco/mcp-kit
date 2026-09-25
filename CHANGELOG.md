@@ -4,7 +4,7 @@ All notable changes to `mcp-kit` are documented here.
 
 The module is pre-1.0. Breaking API changes are allowed between minor versions and must include migration notes.
 
-## v0.6.0 - unreleased
+## v0.6.0 - 2026-09-25
 
 MCP revision **2026-07-28** migration. The kit is now modern-only: it targets a single protocol revision, serves
 Streamable HTTP statelessly, and carries per-request metadata instead of the retired initialize handshake. This is a
